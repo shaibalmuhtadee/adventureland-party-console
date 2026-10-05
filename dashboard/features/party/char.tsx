@@ -70,6 +70,7 @@ export type Char = {
   max_hp: number;
   mp: number;
   max_mp: number;
+  cc?: number;
   gold: number;
   map: string;
   // Display telemetry includes nullable instance IDs when no instance is reported.

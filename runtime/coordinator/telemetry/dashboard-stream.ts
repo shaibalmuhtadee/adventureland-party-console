@@ -13,6 +13,7 @@ export const liveFields = [
   "mp",
   "max_hp",
   "max_mp",
+  "cc",
   "x",
   "y",
   "map",

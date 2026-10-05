@@ -381,7 +381,7 @@
     name: function () { return character.name; }, runtime: function () { return convoyRuntimeId; },
     sample: function () {
       return { vitals: { hp: character.hp, mp: character.mp, max_hp: character.max_hp,
-        max_mp: character.max_mp, x: character.real_x === undefined ? character.x : character.real_x,
+        max_mp: character.max_mp, cc: Math.ceil(Number(character.cc) || 0), x: character.real_x === undefined ? character.x : character.real_x,
         y: character.real_y === undefined ? character.y : character.real_y, map: character.map,
         in: character.in, xp: character.xp || 0, max_xp: character.max_xp || 0, gold: character.gold,
         rip: !!character.rip, target: character.target || null, standOpen: !!character.stand, conditions: activeConditions(),
@@ -2649,6 +2649,7 @@
       max_hp: character.max_hp,
       mp: character.mp,
       max_mp: character.max_mp,
+      cc: Math.ceil(Number(character.cc) || 0),
       gold: character.gold,
       gameParty: currentPartyList(),
       standOpen: !!character.stand,

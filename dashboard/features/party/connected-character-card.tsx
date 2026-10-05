@@ -347,6 +347,12 @@ export const ConnectedCharacterCard = memo(function ConnectedCharacterCard({
             max={char.max_mp}
             color="bg-cyan-400"
           />
+          <Meter
+            label="CC"
+            value={char.cc || 0}
+            max={200}
+            color={Number(char.cc) >= 180 ? "bg-red-900" : "bg-white"}
+          />
         </div>
         <ActiveStatuses
           key={char.name}
