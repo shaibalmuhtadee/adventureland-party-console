@@ -4,9 +4,25 @@
 
 Select only Tiny Crab (`crab`) as the rogue's monster focus and choose its spawn
 region. With no other non-merchant party member or assigned farming participant,
-the rogue holds that region's center and casts `fanofknives` at up to five eligible
+the rogue starts at that region's center and casts `fanofknives` at up to five eligible
 crabs whenever the shared attack cooldown and mana permit. Merchants do not count
 against solo farming. This behavior applies to any rogue, including OperativeAce.
+
+When at most two eligible crabs are in range, it checks nearby walkable positions
+inside the region. It moves only for at least two additional targets, preferring
+the shortest trip for equal coverage and counting at most five targets. Travel
+uses the remaining attack cooldown plus at most 250 ms, capped at one second.
+Ready casts wait at most 250 ms for a better batch. Movement rechecks live crabs
+and stops once three are reachable or the trip no longer improves coverage.
+It holds the resulting position rather than returning to center after each cast.
+Crabs expected to die to projectiles already in flight do not count as new targets.
+
+When `citizen0aura` is absent, movement temporarily prioritizes the nearest
+reachable entry into Kane's 320-unit aura, using native rectangle distance.
+The rogue keeps casting Fan of Knives and stays inside until the buff appears,
+then resumes normal farm positioning. Active buffs impose no movement boundary
+or return timer. Terrain alternatives are sampled when the nearest entry is
+blocked; Kane's last observed location is retained if he leaves client visibility.
 
 This farm uses MP potions below 80% MP, with HP potions below 50% taking priority.
 Keep `mpot1` stocked and enable MP restocking if needed. Fan of Knives requires

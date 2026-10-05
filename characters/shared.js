@@ -15562,24 +15562,26 @@
     return { map: partyLocation.map, x: partyLocation.x, y: partyLocation.y };
   }
 
-  function loneCrabFarmMove() {
-    var center = loneCrabFarm();
-    if (!center) return false;
-    cancelGroupRoute(); cancelFightRoute(); cancelFarmApproach('lone crab farm holds spawn center');
+  function loneCrabFarmMove(destination) {
+    var farm = loneCrabFarm();
+    if (!farm) return false;
+    var center = destination || farm;
+    cancelGroupRoute(); cancelFightRoute(); cancelFarmApproach('lone crab farm owns positioning');
     if (Math.hypot(character.x-center.x, character.y-center.y) <= 1) {
       resetCombatMovement();
       root.partyCombatPosition = { at: Date.now(), mode: 'lone-crab-hold', movementOwner: 'combat', destination: center };
       return true;
     }
     if (typeof can_move_to === 'function' && can_move_to(center.x, center.y))
-      return sendCombatMove({ id: 'lone-crab-center', x: center.x, y: center.y }, center, 'lone-crab-center');
+      return sendCombatMove({ id: 'lone-crab-position', x: center.x, y: center.y }, center, 'lone-crab-position');
     root.partyCombatPosition = { at: Date.now(), mode: 'blocked', movementOwner: 'combat', destination: center,
-      reason: 'Crab spawn center is not directly reachable' };
+      reason: 'Crab farming position is not directly reachable' };
     return true;
   }
 
   root.sharedRoutine = {
     loneCrabFarm: loneCrabFarm,
+    loneCrabFarmContains: function(point) { return !!partyLocation && inFarmArea(point, partyLocation, 0); },
     loneCrabFarmMove: loneCrabFarmMove,
     getLoneCrabTarget: function() {
       return Object.values(parent.entities || {}).filter(function(t) {

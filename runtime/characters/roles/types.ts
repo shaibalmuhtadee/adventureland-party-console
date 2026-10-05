@@ -12,7 +12,8 @@ export interface Role {
 }
 export interface SharedCombat {
   loneCrabFarm?(): { map: string; x: number; y: number } | null;
-  loneCrabFarmMove?(): boolean;
+  loneCrabFarmMove?(point?: { map: string; x: number; y: number }): boolean;
+  loneCrabFarmContains?(point: { map: string; x: number; y: number }): boolean;
   getLoneCrabTarget?: TargetGetter;
   dungeonOwned?(): boolean;
   caveRecoveryReserved?(): boolean;
@@ -104,6 +105,7 @@ export interface SharedCombat {
   smartLoot(): Promise<unknown>;
 }
 export interface CombatState {
+  crabFarm?: import('../farming/lone-crab.ts').CrabPositionDiagnostic | null;
   skill?: import('../skills/types.ts').SkillDiagnostic;
   entityRefresh?: import('../../combat/entity-refresh.ts').EntityRefreshDiagnostic;
   recovery?: { phase: string; attempt: number; lastError: string | null; errorAt: number | null; status: string; at: number; recoveredAt: number | null };

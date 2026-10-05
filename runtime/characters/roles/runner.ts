@@ -222,7 +222,7 @@ export function installRoleRunner(
       if (target) missingSince = 0;
       else if (!missingSince) missingSince = Date.now();
       attacks.wake();
-      if (combatAllowed() && sharedRoutine.loneCrabFarmMove?.()) return;
+      if (combatAllowed() && skills?.farmMovement()) return;
       if (!dungeon && sharedRoutine.groupedMovement?.()) return;
       if (!dungeon && (target || Date.now() - missingSince >= 750) && sharedRoutine.recoverFarmApproach && sharedRoutine.recoverFarmApproach(target)) return;
       if (dungeon && sharedRoutine.caveRecoveryMove?.()) return;

@@ -7,6 +7,7 @@ import { absorbDecision, paladinSupport, rogueSupport, combatBuffSupport, opener
 import type { Combatant, SkillDecision, SkillDiagnostic, SkillId, SkillWorld } from './types.ts';
 
 export interface SkillPorts {
+  loneCrabAttackHeld?(): boolean;
   world(): SkillWorld;
   cast(d: SkillDecision): Promise<unknown>;
   evidence(target: Combatant, state: 'pending' | 'engaged' | 'rejected', action?: string): string | null;
@@ -113,6 +114,7 @@ export function createSkillEngine(ports: SkillPorts) {
       const w = world();
       if (w.context.mode === 'blocked' || !['ranger', 'rogue'].includes(w.actor.ctype)) return null;
       if (w.context.farmingScript === 'lone-crab') {
+        if (ports.loneCrabAttackHeld?.()) return Promise.resolve(false);
         const d = loneCrabAttack(w);
         // A resolved false still owns this attack slot, preventing basic fallback.
         return d ? execute(d) : Promise.resolve(false);
