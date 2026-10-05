@@ -13018,6 +13018,8 @@
       Math.hypot(character.x-anchor.x,character.y-anchor.y) <= groupedCombat.range;
   }
   function groupedAttackAllowed(target) {
+    if (loneCrabFarm() && target && target.mtype === 'crab' && isAllowedTarget(target) &&
+        (!target.target || target.target === character.name)) return true;
     if (dungeonOwned()) return !!(character.cave && !character.cave.paused && dungeonTargetAllowed(target) && groupedFresh() &&
       groupedCombat.target?.id === target.id && groupedCombat.committed);
     if(typeof returnCombatActive==='function' && returnCombatActive())return returnAttacker(target);
@@ -13228,6 +13230,9 @@
     return true;
   }
   function leaderLockAllows(target) {
+    // Fan of Knives pulls multiple crabs. The ordinary group lock selects only
+    // one monster; remaining eligibility checks still enforce bounds and claims.
+    if (target && target.mtype === 'crab' && loneCrabFarm()) return true;
     if(!groupedFarming())return true;
     return !!(target && groupedCombat && groupedCombat.protocol===4 && groupedCombat.target &&
       groupedCombat.target.id===target.id && groupedCombat.target.map===character.map &&
@@ -15499,7 +15504,48 @@
     return false;
   }
 
+  function loneCrabFarm() {
+    if (character.ctype !== 'rogue' || character.rip || monsterFocus.length !== 1 || monsterFocus[0] !== 'crab' ||
+        !partyLocation || partyLocation.map !== character.map || navigationIntent.cancelled ||
+        root.sharedRoutine.isOccupied() || activeCombatEvent() || joinedEvent || dungeonOwned() ||
+        travelCombatActive() || returnCombatActive() || typeof rareActive === 'function' && rareActive()) return null;
+    // Count the actual roster, including off-map members. Missing class data cannot prove solo.
+    var party = typeof get_party === 'function' && get_party() || {};
+    if (currentPartyList().some(function(name) {
+      if (name === character.name) return false;
+      var member = get_player(name) || party[name] || partyPositions.find(function(p) { return p.name === name; });
+      return !member || (member.ctype || member.type) !== 'merchant';
+    })) return null;
+    // Console followers can be assigned before the native party has assembled.
+    if (groupedFresh() && groupedCombat.members.some(function(name) { return name !== character.name; })) return null;
+    return { map: partyLocation.map, x: partyLocation.x, y: partyLocation.y };
+  }
+
+  function loneCrabFarmMove() {
+    var center = loneCrabFarm();
+    if (!center) return false;
+    cancelGroupRoute(); cancelFightRoute(); cancelFarmApproach('lone crab farm holds spawn center');
+    if (Math.hypot(character.x-center.x, character.y-center.y) <= 1) {
+      resetCombatMovement();
+      root.partyCombatPosition = { at: Date.now(), mode: 'lone-crab-hold', movementOwner: 'combat', destination: center };
+      return true;
+    }
+    if (typeof can_move_to === 'function' && can_move_to(center.x, center.y))
+      return sendCombatMove({ id: 'lone-crab-center', x: center.x, y: center.y }, center, 'lone-crab-center');
+    root.partyCombatPosition = { at: Date.now(), mode: 'blocked', movementOwner: 'combat', destination: center,
+      reason: 'Crab spawn center is not directly reachable' };
+    return true;
+  }
+
   root.sharedRoutine = {
+    loneCrabFarm: loneCrabFarm,
+    loneCrabFarmMove: loneCrabFarmMove,
+    getLoneCrabTarget: function() {
+      return Object.values(parent.entities || {}).filter(function(t) {
+        return t && t.type === 'monster' && t.mtype === 'crab' && t.visible && !t.dead && t.hp > 0 &&
+          (!t.target || t.target === character.name) && isAllowedTarget(t);
+      }).sort(function(a,b) { return combatDistance(a)-combatDistance(b); })[0] || null;
+    },
     merchantVisibilityActive: function () { return Date.now() < merchantVisibilityUntil; },
     describeAttackRange: function (target) {
       if (!target || target.mtype !== "crab" || typeof get_width !== "function" || typeof get_height !== "function") return null;
@@ -15883,6 +15929,7 @@
         G.maps[character.map] && G.maps[character.map].event === event.name ||
         monsters.some(function(m){return event.types.indexOf(m.mtype) >= 0;}));
       return { leader: leader || character.name, allies: allies, monsters: monsters,
+        farmingScript: loneCrabFarm() ? 'lone-crab' : undefined,
         event: eventCombat ? event.name : null,
         mode: root.sharedRoutine.isOccupied() || isLiveAbtesting() ? "blocked" : eventCombat ? "event" : !character.cave && farmingMode === "scatter" ? "scatter" : "grouped",
         observedAt: parent.socket && parent.socket.connected ? Date.now() : 0 };

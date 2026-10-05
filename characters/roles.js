@@ -150,6 +150,7 @@
   var role5 = {
     name: "rogue",
     combat: true,
+    usePotion: () => sharedRoutine.loneCrabFarm?.() ? sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.8, priority: "hp" }) : Promise.resolve(false),
     beforeTarget: () => sharedRoutine.skillSupport?.() ?? Promise.resolve(false),
     beforeAttack: (target) => sharedRoutine.skillOffense?.(target) ?? Promise.resolve(false)
   };
@@ -921,6 +922,7 @@
     return Object.entries(s.requirements || {}).every(([key, value]) => Number(Reflect.get(w.actor, key)) >= Number(value));
   }
   function reserve(w) {
+    if (w.context.farmingScript === "lone-crab") return 0;
     const availableCost = (id) => unlocked(w, id) ? cost(w, id) : 0;
     const c = w.actor.ctype;
     if (c === "paladin") return Math.max(w.actor.max_mp * 0.3, 2 * availableCost("selfheal") + availableCost("guardians_oath"));
@@ -1015,6 +1017,13 @@
       return usefulDamage(w, d.skill, target) / divisor;
     };
     return choices.sort((a, b) => score(b) - score(a));
+  }
+
+  // runtime/characters/farming/lone-crab.ts
+  function loneCrabAttack(w) {
+    const cap = w.skills.fanofknives?.max_targets || 5;
+    const targets = w.context.monsters.filter((t) => t.mtype === "crab" && !blocked(w, decision("fanofknives", [t]))).sort((a, b) => Math.hypot(a.x - w.actor.x, a.y - w.actor.y) - Math.hypot(b.x - w.actor.x, b.y - w.actor.y) || a.id.localeCompare(b.id)).slice(0, cap);
+    return targets.length ? decision("fanofknives", targets, "damage", "lone crab farm") : null;
   }
 
   // runtime/characters/skills/protection.ts
@@ -1138,7 +1147,7 @@
       if (pending.has(family(w, d.skill)) || (failures.get(d.skill) || 0) > w.now) return false;
       const cap = Math.max(0, ...Object.keys(w.skills).map((id) => id).filter((id) => unlocked(w, id) && cost(w, id) <= w.actor.mp - reserve(w)).map((id) => cost(w, id)));
       const credit = budget.observe(w.now, w.actor.mp, w.actor.mp - reserve(w), cap);
-      if (d.category === "damage" && w.context.mode !== "event" && credit < cost(w, d.skill)) {
+      if (d.category === "damage" && w.context.mode !== "event" && !(w.context.farmingScript === "lone-crab" && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
         report(w, d, "skipped", "sustained farming MP budget");
         return false;
       }
@@ -1210,16 +1219,22 @@
       },
       support() {
         const w = world();
+        if (w.context.farmingScript === "lone-crab") return Promise.resolve(false);
         const choices = w.actor.ctype === "paladin" ? paladinSupport(w) : w.actor.ctype === "rogue" ? rogueSupport(w) : combatBuffSupport(w);
         return first(choices.filter((d) => d.skill !== "paladin_aura" || w.now - auraAt >= 1e4 && d.argument !== auraState));
       },
       offense(target) {
         const w = world();
+        if (w.context.farmingScript === "lone-crab") return Promise.resolve(false);
         return first(damageChoices(w, target));
       },
       attack(target) {
         const w = world();
         if (w.context.mode === "blocked" || !["ranger", "rogue"].includes(w.actor.ctype)) return null;
+        if (w.context.farmingScript === "lone-crab") {
+          const d2 = loneCrabAttack(w);
+          return d2 ? execute(d2) : Promise.resolve(false);
+        }
         const opening = opener(w, target);
         if (opening && affordable(w, opening)) {
           openerPending = true;
@@ -2660,6 +2675,7 @@
       return currentEpoch(epoch) && !character.rip && !sharedRoutine.isOccupied();
     }
     function chooseTarget() {
+      if (sharedRoutine.loneCrabFarm?.()) return sharedRoutine.getLoneCrabTarget?.() || null;
       if (sharedRoutine.dungeonOwned?.()) return sharedRoutine.getDungeonTarget?.() || null;
       if (sharedRoutine.returnCombatActive?.()) return sharedRoutine.returnDefenseTarget?.() || null;
       if (sharedRoutine.frankyCombatActive?.()) return sharedRoutine.getEventTarget();
@@ -2769,6 +2785,7 @@
         if (target) missingSince = 0;
         else if (!missingSince) missingSince = Date.now();
         attacks.wake();
+        if (combatAllowed() && sharedRoutine.loneCrabFarmMove?.()) return;
         if (!dungeon && sharedRoutine.groupedMovement?.()) return;
         if (!dungeon && (target || Date.now() - missingSince >= 750) && sharedRoutine.recoverFarmApproach && sharedRoutine.recoverFarmApproach(target)) return;
         if (dungeon && sharedRoutine.caveRecoveryMove?.()) return;

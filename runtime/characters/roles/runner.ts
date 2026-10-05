@@ -128,6 +128,7 @@ export function installRoleRunner(
     return currentEpoch(epoch) && !character.rip && !sharedRoutine.isOccupied();
   }
   function chooseTarget() {
+    if (sharedRoutine.loneCrabFarm?.()) return sharedRoutine.getLoneCrabTarget?.() || null;
     if (sharedRoutine.dungeonOwned?.()) return sharedRoutine.getDungeonTarget?.() || null;
     if(sharedRoutine.returnCombatActive?.())return sharedRoutine.returnDefenseTarget?.() || null;
     if (sharedRoutine.frankyCombatActive?.()) return sharedRoutine.getEventTarget();
@@ -221,6 +222,7 @@ export function installRoleRunner(
       if (target) missingSince = 0;
       else if (!missingSince) missingSince = Date.now();
       attacks.wake();
+      if (combatAllowed() && sharedRoutine.loneCrabFarmMove?.()) return;
       if (!dungeon && sharedRoutine.groupedMovement?.()) return;
       if (!dungeon && (target || Date.now() - missingSince >= 750) && sharedRoutine.recoverFarmApproach && sharedRoutine.recoverFarmApproach(target)) return;
       if (dungeon && sharedRoutine.caveRecoveryMove?.()) return;

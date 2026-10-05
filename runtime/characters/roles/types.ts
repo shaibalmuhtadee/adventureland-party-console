@@ -11,6 +11,9 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
+  loneCrabFarm?(): { map: string; x: number; y: number } | null;
+  loneCrabFarmMove?(): boolean;
+  getLoneCrabTarget?: TargetGetter;
   dungeonOwned?(): boolean;
   caveRecoveryReserved?(): boolean;
   caveRecoveryTick?(): Promise<boolean>;

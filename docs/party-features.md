@@ -1,5 +1,21 @@
 ## Party Console and shared banking
 
+### Lone rogue crab farming
+
+Select only Tiny Crab (`crab`) as the rogue's monster focus and choose its spawn
+region. With no other non-merchant party member or assigned farming participant,
+the rogue holds that region's center and casts `fanofknives` at up to five eligible
+crabs whenever the shared attack cooldown and mana permit. Merchants do not count
+against solo farming. This behavior applies to any rogue, including OperativeAce.
+
+This farm uses MP potions below 80% MP, with HP potions below 50% taking priority.
+Keep `mpot1` stocked and enable MP restocking if needed. Fan of Knives requires
+level 65 and an equipped `knifebelt`. The farm reserves attack cooldowns for that
+skill instead of using basic attacks or other rogue damage skills. Travel,
+events, rare encounters, a different monster focus, or another fighter restore
+ordinary behavior. Verify center holding, repeated casts, potion consumption,
+and leaving solo mode manually in game.
+
 ### Merchant logistics
 
 Choose your logistics merchant in the dashboard. Its queue, active job,

@@ -2,6 +2,7 @@ import { createManaBudget } from './budget.ts';
 import { errorReason } from '../roles/types.ts';
 import { blocked, cost, reserve, unlocked } from './eligibility.ts';
 import { bestAttack, damageChoices } from './offense.ts';
+import { loneCrabAttack } from '../farming/lone-crab.ts';
 import { absorbDecision, paladinSupport, rogueSupport, combatBuffSupport, opener } from './protection.ts';
 import type { Combatant, SkillDecision, SkillDiagnostic, SkillId, SkillWorld } from './types.ts';
 
@@ -35,7 +36,8 @@ export function createSkillEngine(ports: SkillPorts) {
       .filter(id => unlocked(w, id) && cost(w, id) <= w.actor.mp - reserve(w))
       .map(id => cost(w, id)));
     const credit = budget.observe(w.now, w.actor.mp, w.actor.mp - reserve(w), cap);
-    if (d.category === 'damage' && w.context.mode !== 'event' && credit < cost(w, d.skill)) {
+    if (d.category === 'damage' && w.context.mode !== 'event' &&
+        !(w.context.farmingScript === 'lone-crab' && d.skill === 'fanofknives') && credit < cost(w, d.skill)) {
       report(w, d, 'skipped', 'sustained farming MP budget'); return false;
     }
     return true;
@@ -96,6 +98,7 @@ export function createSkillEngine(ports: SkillPorts) {
     async absorb() { const d = absorbDecision(world()); return d ? execute(d) : false; },
     support() {
       const w = world();
+      if (w.context.farmingScript === 'lone-crab') return Promise.resolve(false);
       const choices = w.actor.ctype === 'paladin' ? paladinSupport(w) :
         w.actor.ctype === 'rogue' ? rogueSupport(w) : combatBuffSupport(w);
       return first(choices.filter(d => d.skill !== 'paladin_aura' ||
@@ -103,11 +106,17 @@ export function createSkillEngine(ports: SkillPorts) {
     },
     offense(target: Combatant) {
       const w = world();
+      if (w.context.farmingScript === 'lone-crab') return Promise.resolve(false);
       return first(damageChoices(w, target));
     },
     attack(target: Combatant): Promise<boolean> | null {
       const w = world();
       if (w.context.mode === 'blocked' || !['ranger', 'rogue'].includes(w.actor.ctype)) return null;
+      if (w.context.farmingScript === 'lone-crab') {
+        const d = loneCrabAttack(w);
+        // A resolved false still owns this attack slot, preventing basic fallback.
+        return d ? execute(d) : Promise.resolve(false);
+      }
       const opening = opener(w, target);
       if (opening && affordable(w, opening)) {
         openerPending = true;

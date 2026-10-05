@@ -22,6 +22,7 @@ export type Combatant = Omit<Entity, 's'> & { s: Conditions };
 export type Actor = Omit<Character, 's'> & { s: Conditions; damage_type?: DamageType };
 export type Spending = 'survival' | 'maintenance' | 'damage';
 export interface CombatContext {
+  farmingScript?: 'lone-crab';
   leader: string;
   allies: Combatant[];
   monsters: Combatant[];

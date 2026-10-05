@@ -32,6 +32,7 @@ export function unlocked(w: SkillWorld, id: SkillId): boolean {
     Number(Reflect.get(w.actor, key)) >= Number(value));
 }
 export function reserve(w: SkillWorld): number {
+  if (w.context.farmingScript === 'lone-crab') return 0;
   const availableCost = (id: SkillId) => unlocked(w, id) ? cost(w, id) : 0;
   const c = w.actor.ctype;
   if (c === 'paladin') return Math.max(w.actor.max_mp * .3, 2 * availableCost('selfheal') + availableCost('guardians_oath'));
