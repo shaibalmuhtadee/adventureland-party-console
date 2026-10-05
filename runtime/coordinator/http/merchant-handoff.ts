@@ -97,6 +97,7 @@ export function createMerchantHandoffRoutes(state: HandoffState, ports: HandoffP
       jobId: body.jobId,
       merchant: state.merchantCharacter,
       autoItemMarks: state.merchantRules ? {} : state.autoItemMarks[ruleOwner(state, name)] || {},
+      ...(collectsPartyItems(job.reason) ? { combatHandoff: true } : {}),
       cleanout: job.reason === "inventory cleanout",
       threshold: state.threshold,
       goldTarget: Number.isSafeInteger(state.goldTargets[name]) ? state.goldTargets[name] : null,

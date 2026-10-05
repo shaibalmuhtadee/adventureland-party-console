@@ -5063,12 +5063,41 @@
     });
   }
 
+  // Transfers share the native call budget with attacks without stopping combat.
+  var COMBAT_HANDOFF_MAX_CC = 170;
+  async function waitForCallBudget(deadline) {
+    var owner = lastCommand, revision = navigationIntent.revision;
+    while (Math.ceil(Number(character.cc) || 0) >= COMBAT_HANDOFF_MAX_CC) {
+      if (!runtimeCurrent() || character.rip || owner !== lastCommand || navigationIntent.revision !== revision)
+        throw new Error("interrupted");
+      if (Date.now() >= deadline) throw new Error("combat handoff timed out waiting for call budget");
+      await sleep(500);
+    }
+    if (!runtimeCurrent() || character.rip || owner !== lastCommand || navigationIntent.revision !== revision)
+      throw new Error("interrupted");
+  }
+
+  // The merchant pursues the fighter; the fighter keeps its combat movement.
+  async function waitForHandoffRecipient(name, deadline) {
+    var owner = lastCommand, revision = navigationIntent.revision;
+    while (Date.now() < deadline) {
+      if (!runtimeCurrent() || character.rip || owner !== lastCommand || navigationIntent.revision !== revision)
+        throw new Error("interrupted");
+      var player = typeof get_player === "function" && get_player(name);
+      if (player && !player.rip && Math.hypot(
+          Number(player.real_x !== undefined ? player.real_x : player.x) - character.x,
+          Number(player.real_y !== undefined ? player.real_y : player.y) - character.y) <= 300) return player;
+      await sleep(500);
+    }
+    throw new Error("combat handoff timed out waiting for " + name);
+  }
+
   async function withMerchantHandoffRecovery(command, action) {
     var revision = navigationIntent.revision;
-    try { return await afterCombat(action, "merchant handoff"); }
+    try { return command.combatHandoff ? await action() : await afterCombat(action, "merchant handoff"); }
     finally {
       // A late handoff must never override a new manual move or cleared focus.
-      if (!command.convoyContinuation && runtimeCurrent() && lastCommand === command.id && navigationIntent.revision === revision &&
+      if (!command.combatHandoff && !command.convoyContinuation && runtimeCurrent() && lastCommand === command.id && navigationIntent.revision === revision &&
           !navigationIntent.cancelled && partyLocation && character.ctype !== "merchant") {
         beginFarmReunion();
       }
@@ -5096,7 +5125,9 @@
   }
 
   async function merchantHandoff(command) {
-    var merchant = await waitForPlayer(command.merchant, 45000);
+    var handoffDeadline = Date.now() + (command.combatHandoff ? 180000 : 60000);
+    if (command.combatHandoff) await waitForHandoffRecipient(command.merchant, handoffDeadline);
+    else await waitForPlayer(command.merchant, 45000);
     assertMerchantContinuation(command);
     var sent = [], banked = [], kept = [], cleaned = [], reserved = [];
     for (var equippedIndex = 0; equippedIndex < (command.upgrades || []).length; equippedIndex += 1) {
@@ -5183,6 +5214,11 @@
       // Once an emergency visit starts, use its available carrying capacity.
       // Only the follow-up visit depends on the remaining free slots.
       if (requests[i].kind === "cleanout" && !cleanoutEmergency) break;
+      if (command.combatHandoff) {
+        await waitForCallBudget(handoffDeadline);
+        await waitForHandoffRecipient(command.merchant, handoffDeadline);
+        assertMerchantContinuation(command);
+      }
       var slot = Number.isInteger(requests[i].slot) && sameItem(character.items[requests[i].slot], requests[i].item)
         ? requests[i].slot : findItem(requests[i].item);
       if (slot < 0) continue;
@@ -5223,6 +5259,11 @@
     // carried gold. Any requested walking balance is delivered after pickup.
     var excess = Math.max(0, character.gold);
     assertMerchantContinuation(command);
+    if (excess && command.combatHandoff) {
+      await waitForCallBudget(handoffDeadline);
+      await waitForHandoffRecipient(command.merchant, handoffDeadline);
+      assertMerchantContinuation(command);
+    }
     if (excess) await send_gold(command.merchant, excess);
     await request("/merchant/handoff-complete", { method: "POST", body: {
       jobId: command.jobId, commandId: command.id, character: character.name, sent: sent, banked: banked, kept: kept, cleaned: cleaned,
@@ -6097,7 +6138,7 @@
         // Delivery swaps may borrow two reserve slots, but retain one so the
         // lucky slot can be cleared even before the outbound delivery.
         capacity: Math.max(0, freeInventorySlots() - (useTemporaryReserve ? 1 : 3)) } });
-      var deadline = Date.now() + 60000, current;
+      var deadline = Date.now() + (command.combatHandoff ? 180000 : 60000), current;
       do {
         await new Promise(function (resolve) { setTimeout(resolve, 250); });
         current = await request("/merchant/job/" + command.jobId);

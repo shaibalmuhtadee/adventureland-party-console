@@ -157,7 +157,7 @@ export function partyMerchantCommand(
   return scopeWork(job, {
     id,
     type: "merchant-service",
-    ...(collectsPartyItems(job.reason) ? {collectionOnly: true} : {}),
+    ...(collectsPartyItems(job.reason) ? {collectionOnly: true, combatHandoff: true} : {}),
     targetRealm: status.server,
     jobId: job.id,
     target: job.target,
