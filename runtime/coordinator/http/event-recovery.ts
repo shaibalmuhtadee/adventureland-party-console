@@ -1,6 +1,7 @@
 import { requestObject, requestText, type HttpRequest, type HttpResponse } from "./contracts.ts";
 import type { AnniversaryCycle } from "../anniversary/contracts.ts";
 import type { Waypoints } from "../events/return-types.ts";
+import { isHalloweenBoss, type HalloweenObservation } from '../../events/halloween.ts';
 
 interface EventSession {
   event?: string;
@@ -8,11 +9,12 @@ interface EventSession {
   waypoints?: Waypoints;
 }
 interface RecoveryState {
+  merchantCharacter?: string | null;
   leader: string | null;
-  eventReturn: { event: string } | null;
+  eventReturn: { event: string; participants?: string[] } | null;
   anniversary: { eventCycle?: AnniversaryCycle | null };
   eventSessions: Record<string, EventSession | undefined>;
-  statuses: Record<string, { serverLiveEvents?: { name: string }[] } | undefined>;
+  statuses: Record<string, { serverLiveEvents?: { name: string }[]; halloweenObservation?: HalloweenObservation | null } | undefined>;
 }
 interface RecoveryPorts {
   owned(name: string): unknown;
@@ -98,24 +100,42 @@ export function createEventRecoveryRoutes(state: RecoveryState, ports: RecoveryP
       );
     });
   }
+  function withdrawMerchant(body: Record<string, unknown>, name: string, event: string, res: HttpResponse): unknown {
+    if (name !== state.merchantCharacter || event !== 'halloween' || !isHalloweenBoss(body.boss))
+      return res.status(400).json({ error: 'invalid merchant event withdrawal' });
+    const error = merchantWithdrawalHold(name, event, body.boss);
+    if (error) return res.status(409).json({ error });
+    const session = state.eventSessions[name];
+    if (session?.event !== event) return res.json({ ok: true });
+    const recovery = ports.begin(event, { ...session, participants: [name] }, true);
+    delete state.eventSessions[name];
+    return res.json({ ok: true, cycleId: recovery?.cycleId || null });
+  }
+  function merchantWithdrawalHold(name: string, event: string, type: string): string | null {
+    const boss = state.statuses[name]?.halloweenObservation?.bosses.find(entry => entry.type === type);
+    if (boss?.target && boss.target !== name) return 'Halloween boss still has another tank';
+    const returning = state.eventReturn;
+    if (returning && (returning.event !== event || !returning.participants?.includes(name)))
+      return 'another return is in progress';
+    return null;
+  }
+  function beginEnded(eventName: string, res: HttpResponse): unknown {
+    const session = Object.values(state.eventSessions).find((entry) => entry?.event === eventName);
+    const recovery = ports.begin(eventName, session);
+    return res.json({ ok: true, cycleId: recovery?.cycleId || null, pending: recovery ? recovery.pending : [] });
+  }
   function ended(req: HttpRequest, res: HttpResponse): unknown {
     const body = requestObject(req.body),
       name = requestText(body.character),
       event = requestText(body.event);
     if (!ports.owned(name) || !ports.enabled(name))
       return res.status(400).json({ error: "event recovery requires an opted-in character" });
+    if (body.reason === 'unsafe-halloween') return withdrawMerchant(body, name, event, res);
     if ((Number(body.missingFor) || 0) < 10000)
       return res.status(409).json({ error: "event absence has not been sustained" });
     if (stillInside(event))
       return res.status(409).json({ error: "an opted-in party member is still inside the event" });
-    const eventName = requestText(body.event || "event");
-    const session = Object.values(state.eventSessions).find((entry) => entry?.event === eventName);
-    const recovery = ports.begin(eventName, session);
-    return res.json({
-      ok: true,
-      cycleId: recovery?.cycleId || null,
-      pending: recovery ? recovery.pending : [],
-    });
+    return beginEnded(event || 'event', res);
   }
   return { disabled, ended };
 }

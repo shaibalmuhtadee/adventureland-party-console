@@ -5,6 +5,7 @@ import type { ABStrategy } from "./abtesting.ts";
 
 /** Durable event ownership loaded before observations rebuild live event state. */
 export interface SavedEventState extends HuntEventTrips {
+  halloweenAttendance?: unknown;
   activeRealm?: unknown;
   eventReturn?: EventRecovery | null;
   eventSessions?: Record<string, EventSession> | null;

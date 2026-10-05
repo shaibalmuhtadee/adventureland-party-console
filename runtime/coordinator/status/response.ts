@@ -2,6 +2,8 @@ import {collectPassing} from '../../combat/passing.ts';
 import {passingControl} from '../../combat/passing-admission.ts';
 import {outboundHunt} from '../../combat/hunt-travel.ts';
 import { merchantEventRecoveryReserved } from '../merchant/event-control.ts';
+import { selectedEvents } from '../../../dashboard/lib/event-policy.ts';
+import { createHalloweenAttendance } from '../events/halloween.ts';
 import type {Member} from '../../combat/grouped.ts';
 import { monsterFocus, needsCatalog, partyResponse } from "./response-party.ts";
 import {
@@ -56,6 +58,10 @@ const navigationCommands = new Set([
 
 /** Long-running commands remain deliverable until their completion endpoint acknowledges them. */
 export function createHeartbeatResponse(state: HeartbeatState, ports: HeartbeatResponsePorts) {
+  const halloween = createHalloweenAttendance(state, {
+    now: () => ports.now(), selected: name => selectedEvents(state, name).includes('halloween'),
+    persist: () => ports.persist?.(),
+  });
   function restoreTownCommand(name: string): void {
     const town = state.townCycle;
     if (town?.pending.includes(name) && !state.commands[name] && town.revisions?.[name] === ports.navigationRevision(name))
@@ -206,6 +212,7 @@ export function createHeartbeatResponse(state: HeartbeatState, ports: HeartbeatR
       followLeader: !!state.followers[name],
       eventsEnabled: !!ports.enabled(name),
       eventSelections: ports.selectedEvents(name),
+      halloweenAttendance: halloween.response(name),
       partyEventHint: liveEvent(name, names),
       anniversary: ports.anniversary(),
       ...leaderResponse(leader),

@@ -444,7 +444,13 @@
   function eventScheduleSnapshot() {
     var status = eventStatus(), names = Object.keys(G.events || {});
     if (names.indexOf("snowman") < 0) names.push("snowman");
+    if (names.indexOf("halloween") < 0) names.push("halloween");
     return names.map(function(id) {
+      if (id === "halloween") {
+        var halloween = halloweenObservation();
+        return { id: id, name: "Halloween", live: Date.now() - eventFeedAt <= 120000 && halloween.bosses.length > 0,
+          next: halloween.next, statusLabel: halloween.season ? "Season active; waiting for a boss" : "Season inactive" };
+      }
       var value = status[id] || {};
       var schedule = status.schedule || {}, kind = ["crabxx", "goobrawl", "abtesting"].indexOf(id) >= 0 ? "daily" : ["icegolem", "franky"].indexOf(id) >= 0 ? "nightly" : null;
       var hours = kind === "daily" ? schedule.dailies : kind === "nightly" ? schedule.nightlies : null;
@@ -466,6 +472,44 @@
   var manuallySuppressedEvent = root.__partyManuallySuppressedEvent || null;
   var eventMissingSince = 0;
   var partyEventHint = null;
+  var halloweenAttendance = null;
+  function halloweenObservation() {
+    return root.partyHalloweenEvents.observe(eventStatus(), G, eventFeedAt + coordinatorClockOffset);
+  }
+  function halloweenCommitment() {
+    var value = halloweenAttendance;
+    var source = character.ctype !== "merchant" && followLeader && leader ? leader : character.name;
+    return value && value.phase === "attending" && value.source === source && value.realm === reunionRealm() &&
+      value.validUntil > Date.now() + coordinatorClockOffset ? value : null;
+  }
+  function halloweenMerchantSafe(target) {
+    if (character.ctype !== "merchant") return true;
+    var commitment = halloweenCommitment();
+    if (!commitment || Date.now() - eventFeedAt > 120000) return false;
+    var observed = halloweenObservation().bosses.find(function(boss) { return boss.type === commitment.encounter.type; });
+    var visible = target || Object.values(parent.entities || {}).find(function(entity) {
+      return entity && entity.type === "monster" && entity.mtype === commitment.encounter.type &&
+        entity.visible !== false && !entity.dead && entity.hp > 0 &&
+        (!entity.map || entity.map === character.map) && (entity.in == null || entity.in === character.in);
+    });
+    var holder = visible ? visible.target : observed && observed.target;
+    return !!holder && holder !== character.name;
+  }
+  function halloweenTargetAllowed(target) {
+    var commitment = halloweenCommitment();
+    return !!commitment && !!target && target.type === "monster" && target.mtype === commitment.encounter.type &&
+      target.visible !== false && !target.dead && target.hp > 0 && (!target.map || target.map === character.map) &&
+      (target.in == null || target.in === character.in) && halloweenMerchantSafe(target);
+  }
+  function halloweenOwnsCombat() {
+    return eventSelected("halloween") && (joinedEvent === "halloween" || travellingEventName === "halloween");
+  }
+  function halloweenCombatEvent() {
+    var commitment = halloweenCommitment();
+    if (!commitment || !eventSelected("halloween") || !halloweenMerchantSafe()) return null;
+    return { name: "halloween", state: commitment.encounter, types: [commitment.encounter.type],
+      generation: commitment.generation, kind: "monster" };
+  }
   var eventReturnPending = false;
   var eventRecoveryRetryAt = 0;
   var eventRecoveryState = { phase: "idle", cycleId: null, event: null,
@@ -2615,6 +2659,9 @@
       mapEvent: G.maps && G.maps[character.map] && G.maps[character.map].event || null,
       activeEvent: liveEventName,
       serverLiveEvents: serverLiveEvents,
+      halloweenObservation: halloweenObservation(),
+      halloweenDeparturePending: joinedEvent === "halloween" &&
+        (departureCombatPending() || eligibleDepartureChests().length > 0),
       goobrawlCombat: hasGoobrawlCombat(),
       activeEventId: liveEventName && eventStatus() && eventStatus()[liveEventName] &&
         (eventStatus()[liveEventName].id || eventStatus()[liveEventName].event_id) || null,
@@ -10147,6 +10194,7 @@
       if (root.partyRoleRunner && root.partyRoleRunner.wake) root.partyRoleRunner.wake();
       leaderLocation = state.leaderLocation || null;
       partyEventHint = state.partyEventHint || null;
+      halloweenAttendance = root.partyHalloweenEvents.readAttendance(state.halloweenAttendance);
       if (state.eventTrip && (!huntEventTrip || state.eventTrip.startedAt >= huntEventTrip.startedAt))
         huntEventTrip = root.__partyHuntEventTrip = state.eventTrip;
       abtestingStrategy = state.abtestingStrategy || null;
@@ -10287,12 +10335,14 @@
   function supportedEventNames() {
     var names = Object.keys(G.events || {});
     if (names.indexOf("snowman") < 0) names.push("snowman");
+    if (names.indexOf("halloween") < 0) names.push("halloween");
     return names;
   }
 
   function rawServerLiveEvents() {
     var status = eventStatus();
     return supportedEventNames().filter(function (name) {
+      if (name === "halloween") return Date.now() - eventFeedAt <= 120000 && halloweenObservation().bosses.length > 0;
       var state = status && status[name];
       return eventIsSupported(name) && state && state.live !== false;
     }).map(function (name) {
@@ -11449,6 +11499,10 @@
   }
 
   function eventMonsterTypes(eventName) {
+    if (eventName === "halloween") {
+      var commitment = halloweenCommitment();
+      return commitment ? [commitment.encounter.type] : [];
+    }
     var definition = G.events && G.events[eventName];
     var candidates = [];
     if (definition && definition.sprite) candidates.push(definition.sprite);
@@ -11468,7 +11522,7 @@
   function eventIsSupported(eventName) {
     // Snowman is a live, open-world boss. It appears in server.status like
     // instanced events do, but has no join action; travel to it normally.
-    return eventRequiresJoin(eventName) || eventName === "snowman";
+    return eventRequiresJoin(eventName) || eventName === "snowman" || eventName === "halloween";
   }
 
   function eventMapName(eventName) {
@@ -11524,6 +11578,7 @@
 
   function followLeavesCurrentEvent(destination) {
     var event = activeCombatEvent();
+    if (event && event.name === "halloween" && joinedEvent === "halloween") return true;
     return !!(event && destination && destination.map !== character.map &&
       G.maps[character.map] && G.maps[character.map].event === event.name);
   }
@@ -11543,6 +11598,8 @@
     var status = eventStatus();
     if (manuallySuppressedEvent) {
       var suppressedState = status && status[manuallySuppressedEvent.name];
+      if (manuallySuppressedEvent.name === "halloween")
+        suppressedState = Date.now() - eventFeedAt <= 120000 && halloweenObservation().bosses.length > 0 ? {} : null;
       var suppressedId = suppressedState && (suppressedState.id || suppressedState.event_id) || null;
       if (!suppressedState || suppressedState.live === false ||
           manuallySuppressedEvent.id && suppressedId && manuallySuppressedEvent.id !== suppressedId) {
@@ -11550,6 +11607,10 @@
       }
     }
     return supportedEventNames().map(function (name) {
+      if (name === "halloween") {
+        if (manuallySuppressedEvent && manuallySuppressedEvent.name === name) return null;
+        return halloweenCombatEvent();
+      }
       var state = status && status[name];
       var types = eventMonsterTypes(name);
       var corroborated = partyEventHint === name || name === "goobrawl" && hasGoobrawlCombat();
@@ -11585,6 +11646,12 @@
 
   function nearestEventTarget() {
     if (joinedEvent && !eventSelected(joinedEvent) || travellingEventName && !eventSelected(travellingEventName)) return null;
+    if (halloweenOwnsCombat()) {
+      var halloweenTargets = Object.values(parent.entities || {}).filter(halloweenTargetAllowed);
+      var retainedHalloween = halloweenTargets.find(function(target) { return target.id === combatTargetId; });
+      halloweenTargets.sort(function(a, b) { return distance(character, a) - distance(character, b) || String(a.id).localeCompare(String(b.id)); });
+      return retainedHalloween || halloweenTargets[0] || null;
+    }
     if (typeof frankyCombatActive === "function" && frankyCombatActive()) {
       var bosses = Object.values(parent.entities || {}).filter(frankyTargetAllowed);
       var retained = bosses.find(function (target) { return target.id === combatTargetId; });
@@ -11820,6 +11887,17 @@
     if (huntTurnInPriority || convoyTraveling && convoyTraveling.nonPreemptible) return;
     eventPollBusy = true;
     try {
+      if (character.ctype === "merchant" && joinedEvent === "halloween" && !eventReturnPending && !halloweenMerchantSafe()) {
+        var unsafeCommitment = halloweenCommitment();
+        if (unsafeCommitment) {
+          try {
+            await request("/event-ended", { method: "POST", body: { character: character.name, event: "halloween",
+              reason: "unsafe-halloween", boss: unsafeCommitment.encounter.type } });
+            eventTargetTypes = []; joinedEvent = root.__partyJoinedEvent = null;
+          } catch (_unsafeHalloweenReturn) {}
+          return;
+        }
+      }
       if (character.ctype === "merchant" && merchantEventWorkReserved()) {
         // Never take movement from an unsettled inventory operation or worker.
         if (root.__merchantActiveJob || root.__merchantInventoryTidy || merchantIdleActive ||
@@ -11877,7 +11955,9 @@
       if (!event) {
         eventTargetTypes = [];
         if (joinedEvent && !eventReturnPending) {
-          if (partyEventHint === joinedEvent) {
+          if (joinedEvent === "halloween" && (departureCombatPending() || eligibleDepartureChests().length > 0)) return;
+          if (partyEventHint === joinedEvent && (joinedEvent !== "halloween" ||
+              (Date.now() - eventFeedAt <= 120000 && halloweenObservation().bosses.length > 0))) {
             eventMissingSince = 0;
             return;
           }
@@ -11922,11 +12002,13 @@
       travellingEventName = event.name;
       var travelSelectionRevision = eventSelectionRevision;
       var travelNavigationRevision = navigationIntent.revision;
+      var travelEventGeneration = event.generation;
       function currentEventTravel() {
         var live = activeCombatEvent();
         return runtimeCurrent() && !character.rip && !escapeOwns() && !navigationIntent.cancelled &&
           travelNavigationRevision === navigationIntent.revision && eventSelected(event.name) &&
-          travelSelectionRevision === eventSelectionRevision && live && live.name === event.name;
+          travelSelectionRevision === eventSelectionRevision && live && live.name === event.name &&
+          (event.name !== "halloween" || live.generation === travelEventGeneration);
       }
       try {
         var destination = eventDestination(event.name, event.state);
@@ -12246,7 +12328,7 @@
     var revision = Number(navigationIntent.revision), selection = eventSelectionRevision;
     function current() { var live = activeCombatEvent(); return runtimeCurrent() && !character.rip && !escapeOwns() && !navigationIntent.cancelled &&
       Number(navigationIntent.revision) === revision && eventSelectionRevision === selection && eventSelected(event.name) &&
-      live && live.name === event.name; }
+      live && live.name === event.name && (event.name !== "halloween" || live.generation === event.generation); }
     if (!await eventTravelAllowed(event.name)) return { status: current() ? "retryable" : "cancelled", reason: "Waiting for event travel permission" };
     if (eventTraveling) return { status: "retryable", reason: "Event travel already in progress" };
     eventTargetTypes = event.types; eventMissingSince = 0;
@@ -13165,6 +13247,8 @@
     if (character.cave || typeof root !== "undefined" && root.__partyDungeonRuntime && root.__partyDungeonRuntime.owns()) return dungeonTargetAllowed(target);
     if(typeof returnCombatActive==='function' && returnCombatActive())return returnAttacker(target);
     function reject(reason) { if (diagnostic) diagnostic.reason = reason; return false; }
+    if (halloweenOwnsCombat() && !isAttackingPartyMember(target) && !halloweenTargetAllowed(target))
+      return reject("Halloween attendance permits only its committed boss");
     if (typeof frankyCombatActive === "function" && frankyCombatActive() && !frankyTargetAllowed(target))
       return reject("Franky attendance only permits the Franky monster");
     var huntTravel = huntTravelCommand && huntTravelCommand.purpose === "monster-hunt" &&
@@ -13493,11 +13577,43 @@
     if(!points.length)throw new Error("No walkable entry point in selected farming zone");
     return points[0];
   }
+  async function independentHalloweenWalk(destination, current) {
+    var revision = navigationIntent.revision, generation = runtimeGeneration;
+    var owner = { activity: "event", key: "halloween" }, done = false, failed = null;
+    var deadline = Date.now() + 180000;
+    root.__partySharedWalking = owner;
+    try {
+      Promise.resolve(smart_move(destination)).then(function() { done = true; }, function(error) { failed = error; done = true; });
+      while (!done) {
+        if (!runtimeCurrent() || runtimeGeneration !== generation || navigationIntent.revision !== revision ||
+            current && !current()) throw new Error("interrupted");
+        if (nearestEventTarget() || character.map === destination.map &&
+            Math.hypot(character.x - destination.x, character.y - destination.y) <= 55) return;
+        if (Date.now() > deadline) throw new Error("Halloween travel timed out");
+        await new Promise(function(resolve) { setTimeout(resolve, 250); });
+      }
+      if (failed) throw failed;
+    } finally {
+      if (root.__partySharedWalking === owner) {
+        root.__partySharedWalking = null;
+        // A newer manual command owns its own movement and must survive cleanup.
+        if (!done && runtimeCurrent() && runtimeGeneration === generation && navigationIntent.revision === revision) {
+          try { await stop("smart"); await stop("move"); } catch (_halloweenWalkStop) {}
+        }
+      }
+    }
+  }
   async function sharedPartyWalk(destination, activity, key, parentCommand, current) {
-    if(character.name!==leader && !followLeader)return smart_move(destination);
+    if(character.name!==leader && !followLeader)
+      return activity === "event" && key === "halloween" ? independentHalloweenWalk(destination, current) : smart_move(destination);
     var revision=Number(navigationIntent.revision)||0,generation=runtimeGeneration;
     var body={character:character.name,runtimeId:convoyRuntimeId,navigationRevision:revision,
       destination:destination,activity:activity,key:String(key||activity),parentCommandId:parentCommand?parentCommand.id:0};
+    if (activity === "event" && key === "halloween") {
+      var halloweenOwner = halloweenCommitment();
+      if (!halloweenOwner) throw new Error("Halloween encounter authority unavailable");
+      body.halloweenGeneration = halloweenOwner.generation;
+    }
     root.__partyWalkSequence=(Number(root.__partyWalkSequence)||0)+1;
     body.token=convoyRuntimeId+":"+root.__partyWalkSequence;
     var deadline=Date.now()+180000,completed=false,requestFailures=0;
@@ -15777,6 +15893,7 @@
       if(dungeonOwned()) return dungeonTargetAllowed(target);
       if(huntTravelDefense() && !isAttackingPartyMember(target) && !(convoyTraveling.defenseTargets||[]).some(function(t){return passingKey(t)===passingKey(target);}))return false;
       if (typeof frankyCombatActive === "function" && frankyCombatActive()) return frankyTargetAllowed(target);
+      if (halloweenOwnsCombat()) return halloweenTargetAllowed(target) || isAttackingPartyMember(target);
       if (target.target && !isAttackingPartyMember(target)) return false;
       if (groupedAttackAllowed(target)) return true;
       return groupedFarming() && groupedFresh() && groupedCombat.committed &&

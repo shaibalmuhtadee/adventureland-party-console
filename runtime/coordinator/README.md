@@ -9,6 +9,19 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+Halloween attendance normalizes the seasonal flag and the separate Mr. Pumpkin
+and Mr. Green server reports through `runtime/events/halloween.ts`. The
+`events/halloween.ts` service commits one boss for each event-policy source and
+realm, persists its generation, and publishes it through heartbeats. Following
+characters use that same encounter. Raw boss observations remain independent of
+the commitment, so an active season without live bosses cannot pause ordinary
+activity. Halloween walks carry the encounter generation; cleanup can cancel the
+matching old walk after its generation is revoked. Merchant loss of another tank
+requests its own protected event return. Existing attendance, Hunt, respawn, and
+saved-waypoint recovery retain ownership. Activate with the ordinary full
+`scripts/start-console.ps1` restart to publish both coordinator and character code.
+The user verifies this feature manually in game.
+
 Merchant settings stores one Main-map stand location for parking, Town-return
 checks and marketplace fallbacks. A fresh settings store chooses integer X/Y
 coordinates independently within -100..100, rejects native collision geometry

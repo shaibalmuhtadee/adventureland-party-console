@@ -86,6 +86,7 @@ export const settingsFields = [
   "eventsByCharacter",
   "eventSelectionsByCharacter",
   "eventSessions",
+  "halloweenAttendance",
   "eventReturn",
   "deferredEventReturns",
   "abtestingStrategy",

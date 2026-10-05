@@ -11,4 +11,5 @@ import "./craft-reservations.ts";
 import "./compound-storage.ts";
 import "./bank-stacks.ts";
 import "./movement.ts";
+import "./halloween.ts";
 import "../../characters/shared.js";

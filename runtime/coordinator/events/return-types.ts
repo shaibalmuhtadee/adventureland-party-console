@@ -52,6 +52,7 @@ export interface ReturnStatus {
   seenAt?: number;
   rip?: boolean;
   goobrawlCombat?: boolean;
+  halloweenDeparturePending?: boolean;
   serverLiveEvents?: { name: string }[];
   eventRecovery?: { cycleId: string; phase: string };
 }

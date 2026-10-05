@@ -2,6 +2,8 @@ import type { MerchantCommand } from "../merchant/work.ts";
 import type { Catalog } from "../../../dashboard/lib/farming-zones.ts";
 
 export interface HeartbeatStatus {
+  halloweenObservation?: import('../../events/halloween.ts').HalloweenObservation | null;
+  halloweenDeparturePending?: boolean;
   [field: string]: unknown;
   name: string;
   server?: string;
@@ -52,6 +54,7 @@ export const heartbeatStateFields = [
 ] as const;
 
 export interface HeartbeatState extends Record<(typeof heartbeatStateFields)[number], unknown> {
+  halloweenAttendance?: Record<string, import('../../events/halloween.ts').HalloweenAttendance>;
   dailyDungeons?: import("../../dungeons/contracts.ts").DungeonState;
   passiveHunting: import('../navigation/passive-settings.ts').PassiveSettings;
   eventSessions?: import('../merchant/event-control.ts').MerchantEventState['eventSessions'];
@@ -95,6 +98,7 @@ export interface HeartbeatState extends Record<(typeof heartbeatStateFields)[num
 }
 
 export interface HeartbeatResponsePorts {
+  persist?(): void;
   now(): number;
   activeNames(): string[];
   enabled(name: string, event?: string): boolean;

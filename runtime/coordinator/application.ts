@@ -484,6 +484,7 @@ export function startCoordinatorApplication(
     const upgradePreviews = createUpgradePreviews(party, {persist:persistSettings, dispatch:dispatchMerchant, stamp:stampMerchantJob});
     const heartbeatResponse = coordinatorPolicies.createCoordinatorHeartbeatResponse(party, {
       now: () => Date.now(),
+      persist: persistSettings,
       activeNames: () => activeNames().filter(n => n === party.merchantCharacter || farmingScopes.owner(n) === party.leader),
       enabled: eventsEnabledFor,
       intent: (name) => farmingNavigation.intent(name),
@@ -1764,6 +1765,7 @@ export function startCoordinatorApplication(
 
     const heartbeatResponse = coordinatorPolicies.createCoordinatorHeartbeatResponse(party, {
       now: () => Date.now(),
+      persist: persistSettings,
       activeNames,
       enabled: eventsEnabledFor,
       intent: (name) => farmingNavigation.intent(name),

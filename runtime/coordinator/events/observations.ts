@@ -238,9 +238,20 @@ export function createEventObservations(
     );
     return (
       !rawLive(session.event) &&
+      !halloweenDeparturePending(session) &&
       !(session.event === "goobrawl" && ports.goobrawlStillFighting()) &&
       ports.now() - latest >= 10000
     );
+  }
+
+  function halloweenDeparturePending(session: EventSession): boolean {
+    if (session.event !== 'halloween') return false;
+    const participants = Object.values(state.sessions).filter(entry => entry.event === session.event)
+      .flatMap(entry => entry.participants);
+    return participants.some(name => {
+      const status = ports.statuses()[name];
+      return status?.halloweenDeparturePending === true && ports.now() - Number(status.seenAt || 0) < 10000;
+    });
   }
 
   function beginEndedReturn(): void {

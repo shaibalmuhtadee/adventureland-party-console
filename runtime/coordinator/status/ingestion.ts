@@ -3,6 +3,7 @@ import {rememberCharacterAppearance, type AppearanceState} from "./character-app
 import { requestObject, type HttpRequest, type HttpResponse } from "../http/contracts.ts";
 import { createCombatIngestion, preserveNewerCombat } from "./combat-ingestion.ts";
 import { receiveLuckySlotTracking, type LuckySlotState } from "./lucky-slot-tracking.ts";
+import { readHalloweenObservation } from '../../events/halloween.ts';
 
 export interface StatusReport {
   name: string;
@@ -103,6 +104,8 @@ export function createStatusIngestion<Report extends StatusReport>(
       return channel.handle(raw.name, raw, res);
     // Report fields are decoded by their domain consumer; unrecognized fields remain available to the dashboard.
     const body = raw as unknown as Report;
+    raw.halloweenObservation = readHalloweenObservation(raw.halloweenObservation);
+    raw.halloweenDeparturePending = raw.halloweenDeparturePending === true;
     if (receiveLuckySlotTracking(state, raw.name, raw.luckySlotTracking)) measureStatusStage('persist', () => ports.persist());
     if (rememberCharacterAppearance(state, body, ports.now())) ports.persistRoster();
     const learned = consume(body);
