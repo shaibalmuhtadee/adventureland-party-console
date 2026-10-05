@@ -19,6 +19,7 @@ export interface MarketListing {
 
 /** Work payloads are forwarded unchanged; execution belongs to the character runtime. */
 export interface MerchantWork extends MerchantJob {
+  pontyShop?: import('./ponty-shopping.ts').PontyShoppingTrip;
   operationStage?: import('./activity.ts').MerchantOperationStage;
   expiresAt?: number;
   destinationRealm?: string;

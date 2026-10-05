@@ -52,6 +52,9 @@ export function ItemDetails({
   standFull,
   onNavigate,
   onAddWTB,
+  onAddPonty,
+  pontyShoppingList = [],
+  pontyPending = false,
   onAddStand,
   onCompare,
   onCompareCatalog,
@@ -67,6 +70,9 @@ export function ItemDetails({
   standFull: boolean;
   onNavigate: (monster: BestiaryMonster) => void;
   onAddWTB: (item: Item, meta?: ItemMeta | null) => void;
+  onAddPonty?: (itemId: string) => Promise<void>;
+  pontyShoppingList?: string[];
+  pontyPending?: boolean;
   onAddStand: (entry: InventoryEntry, source: NonNullable<SelectedItem["source"]>) => void;
   onCompare: (character: Char, entry: InventoryEntry, slot?: string) => void;
   onCompareCatalog: (entry: InventoryEntry) => void;
@@ -324,7 +330,7 @@ export function ItemDetails({
               </DialogDescription>
             </div>
             {selected?.entry.item.name ? (
-              <div className="ml-auto flex shrink-0 items-center gap-2">
+              <div className="ml-auto flex max-w-[55%] shrink-0 flex-wrap items-center justify-end gap-2">
                 {selected.source && selected.entry.slot >= 0 ? (
                   <Button
                     type="button"
@@ -348,6 +354,14 @@ export function ItemDetails({
                   <HandCoins className="mr-2 h-4 w-4" />
                   Add to WTB
                 </Button>
+                {selected.catalog && onAddPonty && (
+                  <Button type="button" variant="outline"
+                    disabled={pontyPending || pontyShoppingList.includes(selected.entry.item.name)}
+                    onClick={() => void onAddPonty(selected.entry.item.name)}
+                    className="border-cyan-600 bg-black text-cyan-200 hover:border-cyan-400 hover:bg-cyan-950 hover:text-white disabled:text-slate-400">
+                    {pontyShoppingList.includes(selected.entry.item.name) ? 'Added to Ponty' : 'Add to Ponty'}
+                  </Button>
+                )}
               </div>
             ) : null}
           </div>

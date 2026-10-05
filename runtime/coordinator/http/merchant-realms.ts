@@ -1,5 +1,6 @@
 import { requestObject, type HttpRequest, type HttpResponse } from "./contracts.ts";
 import type { MerchantWork } from "../merchant/work.ts";
+import { currentMerchantReport } from '../merchant/commerce-progress.ts';
 
 interface MerchantRealmState {
   merchantCharacter: string | null;
@@ -24,10 +25,19 @@ const realmJobs = [
   "ALData marketplace sales",
   "join giveaway",
   "Ponty purchases",
+  "ponty shop",
 ];
 
 function matchingRealmJob(current: MerchantWork | null, jobId: unknown): current is MerchantWork {
   return !!current && current.id === jobId && realmJobs.includes(current.reason);
+}
+function matchingPontyCommand(current: MerchantWork, body: Record<string, unknown>): boolean {
+  return current.reason !== 'ponty shop' || (currentMerchantReport(current, body) && body.commandId === current.commandId);
+}
+function purpose(reason: string): string {
+  if (reason === 'join giveaway') return ' for giveaway entry';
+  if (reason === 'ponty shop') return ' for Ponty Shop';
+  return ' for marketplace transaction';
 }
 
 export function createMerchantRealmRoutes<Block extends RealmBlock>(
@@ -40,6 +50,8 @@ export function createMerchantRealmRoutes<Block extends RealmBlock>(
       merchant = state.merchantCharacter;
     if (!merchant || !matchingRealmJob(current, body.jobId) || body.character !== merchant)
       return res.status(409).json({ error: "ALData marketplace job is no longer current" });
+    if (!matchingPontyCommand(current, body))
+      return res.status(409).json({ error: 'Ponty Shop command is no longer current' });
     const realm = typeof body.realm === "string" ? body.realm : "";
     if (!ports.resolve(realm))
       return res.status(400).json({ error: "unknown Adventure Land realm" });
@@ -47,15 +59,15 @@ export function createMerchantRealmRoutes<Block extends RealmBlock>(
     if (block.realm === realm && block.connected) return res.json({ ok: true, alreadyThere: true });
     block.realm = realm;
     current.phase = "switching realm";
+    current.destinationRealm = realm;
+    current.realmStartedAt = ports.now();
     current.heartbeatAt = current.progressAt = ports.now();
     ports.log(
       "Switching " +
         merchant +
         " to " +
         realm.replace(/^SR_/, "") +
-        (current.reason === "join giveaway"
-          ? " for giveaway entry"
-          : " for marketplace transaction"),
+        purpose(current.reason),
       "info",
     );
     ports.persist();

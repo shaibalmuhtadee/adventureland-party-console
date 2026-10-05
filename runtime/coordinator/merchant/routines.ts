@@ -17,6 +17,7 @@ export function routineFor(job: RoutineJob): string {
 }
 export function routineEnabled(job: RoutineJob, enabled: Record<string, boolean | undefined>): boolean {
   if (routineFor(job) === 'manual exchange') return true;
+  if (job.reason === 'ponty shop' && job.manual === true) return true;
   if (job.reason === 'party collection' && job.manual === true) return true;
   return enabled[routineFor(job)] !== false;
 }

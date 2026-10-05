@@ -9,6 +9,11 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+## Ponty Shop
+
+See [Ponty shopping](../../docs/ponty-shopping.md) for catalog/list controls, hourly
+scheduling, durable scan progress, managed server travel and full-restart activation.
+
 Halloween attendance normalizes the seasonal flag and the separate Mr. Pumpkin
 and Mr. Green server reports through `runtime/events/halloween.ts`. The
 `events/halloween.ts` service commits one boss for each event-policy source and

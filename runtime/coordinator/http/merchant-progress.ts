@@ -1,5 +1,6 @@
 import { releaseMerchantInterruption } from "../navigation/merchant-interruption.ts";
 import { currentMerchantReport } from '../merchant/commerce-progress.ts';
+import { PONTY_SHOP_REALMS } from '../merchant/ponty-shopping.ts';
 import { merchantJobReady } from '../merchant/priority.ts';
 import { routineEnabled } from '../merchant/routines.ts';
 import { offeringStock } from '../inventory/offering-stock.ts';
@@ -15,6 +16,8 @@ import { collectionPickups, type PickupState } from '../merchant/collection-pick
 import { collectsPartyItems } from '../merchant/pickup-jobs.ts';
 
 interface ProgressState extends CraftReservationState, PickupState, OfferingRulesState, MerchantEventState {
+  pontyShoppingList?: string[];
+  activeRealm?: string;
   autoCompounds?: BankImprovementState['autoCompounds'];
   merchantRules?: BankImprovementState['merchantRules'];
   merchantAutomations?: Record<string, boolean | undefined>;
@@ -40,6 +43,14 @@ interface ProgressPorts {
 }
 
 export function createMerchantProgressRoutes(state: ProgressState, ports: ProgressPorts) {
+  function pontyDetails(current: MerchantWork) {
+    if (current.reason !== 'ponty shop') return {};
+    return {
+      pontyShoppingList: state.pontyShoppingList || [], pontyShopHomeRealm: state.activeRealm,
+      pontyShopRealms: PONTY_SHOP_REALMS,
+      pontyShopEnabled: current.manual === true || state.merchantAutomations?.['ponty shop'] !== false,
+    };
+  }
   function nextTarget(job: MerchantWork): string | null {
     const next = job.batchId
       ? state.merchantQueue.find((candidate) => candidate.batchId === job.batchId) || null
@@ -55,6 +66,7 @@ export function createMerchantProgressRoutes(state: ProgressState, ports: Progre
     const target = typeof req.query?.target === "string" ? req.query.target : current.target;
     return res.json({
       ...current,
+      ...pontyDetails(current),
       targetStatus: state.statuses[String(target)] || null,
       nextCollectionTarget: nextTarget(current),
       craftProtection: craftProtection(state),

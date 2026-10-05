@@ -6,6 +6,7 @@ const ItemDetails = lazy(() =>
 );
 import { standIsFull } from "./stand-capacity";
 import { same } from "./same";
+import { usePartyAction } from './query-actions';
 import type { PartyConsoleModel } from "./use-party-console";
 
 import { usePanelModel } from "./use-panel-model";
@@ -15,6 +16,7 @@ export function PartyItemDetails({ model }: { model: PartyConsoleModel }) {
   return model.selected ? <PartyItemDetailsConnected base={model} /> : null;
 }
 function PartyItemDetailsConnected({ base }: { base: PartyConsoleModel }) {
+  const action = usePartyAction();
   const model = usePanelModel(base, { inventory: true, vitals: true, bank: true, market: true });
   const {
     state,
@@ -42,6 +44,12 @@ function PartyItemDetailsConnected({ base }: { base: PartyConsoleModel }) {
         standFull={standIsFull(state.standListings || [], state.standBids || {})}
         onNavigate={(monster) => setMonsterNavigateTarget(monster)}
         onAddWTB={(item, meta) => setWtbItem({ item, meta })}
+        pontyShoppingList={state.pontyShoppingList || []}
+        pontyPending={action.isPending}
+        onAddPonty={async itemId => {
+          try { await action.mutateAsync({ path: '/merchant/ponty-shopping-list', body: { itemId } }); }
+          catch (error) { setActionError(error instanceof Error ? error.message : 'Could not add Ponty item'); }
+        }}
         onAddStand={(entry, source) => {
           const value = { defaultPrice: Math.max(1, Number(entry.meta?.definition.g) || 1) };
           const bankPack = source.kind === "bank" ? source.pack : undefined;

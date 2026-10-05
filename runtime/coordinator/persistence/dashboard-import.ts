@@ -65,6 +65,8 @@ export const validators: Record<string, (value: unknown) => boolean> = {
   phoenixRouteOrder: listOf(text),
   merchantRoutinePriorities: mapOf(number),
   merchantAutomations: mapOf(boolean),
+  pontyShoppingList: listOf(text),
+  pontyShopLastRunAt: (value: unknown) => value === null || (number(value) && Number(value) >= 0),
   npcSaleMarks: listOf((value) => object(value) && item(value.item) && text(value.id)),
   deconstructionMarks: listOf((value) => object(value) && item(value.item) && text(value.id) && text(value.owner) && text(value.origin) && number(value.quantity)),
   autoDeconstruction: mapOf(mapOf((value) => object(value) && item(value.item))),

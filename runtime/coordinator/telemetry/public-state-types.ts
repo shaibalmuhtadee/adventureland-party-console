@@ -25,6 +25,7 @@ export const publicStateFields = [
   "autoStandMarks",
   "merchantRoutinePriorities",
   "merchantAutomations",
+  "pontyShoppingList", "pontyShopLastRunAt",
   "merchantBlacklist",
   "standBids",
   "nativeStand",

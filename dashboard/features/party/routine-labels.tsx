@@ -27,6 +27,7 @@ export const routineLabels: Record<string, string> = {
   "merchant donation": "Donate gold",
   "send mail": "Send mail",
   "join giveaway": "Join giveaways",
+  "ponty shop": "Ponty Shop",
   "stand maintenance": "Stand listing maintenance",
   fishing: "Fishing",
   mining: "Mining",

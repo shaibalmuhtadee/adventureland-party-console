@@ -12,4 +12,5 @@ export const automaticRoutineKeys = new Set([
   "party collection",
   "auto npc sales",
   "join giveaway",
+  "ponty shop",
 ]);

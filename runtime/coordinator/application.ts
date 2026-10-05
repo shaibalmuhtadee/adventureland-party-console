@@ -14,6 +14,7 @@ import { migrateSharedRules, installSharedRuleRoutes, sharedMember } from "./inv
 import { loadCoordinatorGeometry } from './navigation/planner-geometry.ts';
 import { initializeStandLocation, standLocationRoute } from './merchant/stand-location.ts';
 import { createRareRouteDistance } from './navigation/rare-route-distance.ts';
+import { createPontyShopping } from './merchant/ponty-shopping.ts';
 export function startCoordinatorApplication(
   platform: CoordinatorApplicationPlatform,
 ): Promise<void> {
@@ -302,10 +303,16 @@ export function startCoordinatorApplication(
       closeStorage: () => { movementPlanner.dispose(); localStorage.close(); },
       exit: () => process.exit(),
     });
+    const pontyShopping = createPontyShopping(party, {
+      now: () => Date.now(), nextCommand: () => party.nextCommandId++, stamp: stampMerchantJob,
+      persist: persistSettings, dispatch: dispatchMerchant, log: merchantLog,
+      ensureHome: ensureMerchantHome,
+    });
     const { dispatcher: merchantDispatcher, idle: merchantIdle } =
       coordinatorPolicies.createCoordinatorMerchantServices(party, {
         now: () => Date.now(),
         headless: () => !party.steamMembers.includes(String(party.merchantCharacter)),
+        started: job => pontyShopping.started(job),
         travel: async (realm) => {
           const merchant = String(party.merchantCharacter);
           if (!my_acc.resolve_realm(realm)) throw new Error("Unknown merchant destination realm");
@@ -1057,6 +1064,7 @@ export function startCoordinatorApplication(
       stamp: stampMerchantJob,
     });
     setInterval(() => merchantSettingsRoutes.bankSort.reconcile(), 1000);
+    setInterval(() => { if (!consoleUpdate.current()) pontyShopping.tick(); }, 1000);
     const { maps: mapStreams, combat: combatLogRoutes, prepareVersion } =
       coordinatorPolicies.createCoordinatorTelemetry(__dirname, version, party.combatLogs, {
         owned: ownedCharacter,
@@ -1555,6 +1563,7 @@ export function startCoordinatorApplication(
     function dispatchMerchant() {
       if (consoleUpdate.current()) return;
       merchantRecovery.expire(String(party.merchantCharacter));
+      pontyShopping.schedule();
       if (coordinatorPolicies.pruneIneligibleCollections(party, () => Date.now())) persistSettings();
       merchantDispatcher.dispatch();
     }
@@ -2190,6 +2199,7 @@ export function startCoordinatorApplication(
               text: (options) => express.text(options),
               maps: (router) => {
                 dungeons.install(router);
+                pontyShopping.install(router);
                 upgradePreviews.install(router);
                 router.get('/party-api/console-maintenance', (_req, res) => res.json(consoleUpdate.status(party.statuses,
                   [...party.headlessSlots, ...party.steamMembers], !!party.steamSwitch && party.steamSwitch.phase !== 'complete')));

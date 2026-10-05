@@ -29,6 +29,7 @@ export function merchantRoutineNeedsHome(reason: string): boolean {
     "ALData marketplace sales",
     "join giveaway",
     "Ponty purchases",
+    "ponty shop",
     "stand maintenance",
   ].includes(reason);
 }

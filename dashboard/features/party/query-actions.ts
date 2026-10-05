@@ -61,6 +61,8 @@ export const actionDomains = {
   '/merchant/aldata-order': commerce,
   '/merchant/aldata-sale': commerce,
   '/merchant/ponty-order': commerce,
+  '/merchant/ponty-shopping-list': core,
+  '/merchant/ponty-shop': commerce,
   '/merchant/donate': inventory,
   '/merchant/join-giveaway': inventory,
   '/merchant/send-mail': [...commerce, 'mail'],

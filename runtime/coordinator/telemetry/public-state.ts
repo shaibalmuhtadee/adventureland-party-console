@@ -71,6 +71,7 @@ const configFields = [
   "standListings", "npcSaleMarks", "deconstructionMarks", "autoDeconstruction",
   "deconstructionCatalog", "autoNpcSales", "autoStandMarks",
   "merchantRoutinePriorities", "merchantAutomations", "merchantBlacklist",
+  "pontyShoppingList", "pontyShopLastRunAt",
   "standBids", "autoStandBuys", "autoBlacklistMerchants", "standSearch",
   "upgrades", "statScrolls", "compounds", "autoCompounds", "autoExchanges", "goldTargets",
   "leader", "followers", "eventsByCharacter", "eventSelectionsByCharacter",

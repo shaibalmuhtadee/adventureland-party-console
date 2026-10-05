@@ -66,6 +66,7 @@ export const settingsFields = [
   "autoStandMarks",
   "merchantRoutinePriorities",
   "giveawayAttempts",
+  "pontyShoppingList", "pontyShopLastRunAt",
   "merchantAutomations",
   "standBids",
   "nativeStand",

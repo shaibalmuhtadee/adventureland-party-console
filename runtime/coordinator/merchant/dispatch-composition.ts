@@ -56,6 +56,7 @@ interface DispatchCoordinatorState extends BankImprovementState, MerchantEventSt
 type CompositionPorts = Pick<
   DispatchPorts,
   | "now"
+  | "started"
   | "travel"
   | "headless"
   | "ensureHome"

@@ -41,7 +41,7 @@ export function createNativeStandRoute(state: State, ports: Ports) {
     return prepare(job, key, body, res);
   }
   function suspend(body: Record<string, unknown>): boolean {
-    return ["stand bid purchases", "stand purchases", "ALData marketplace purchases", "Ponty purchases"].includes(state.merchantCurrent?.reason || "") || body.suspend === true;
+    return ["stand bid purchases", "stand purchases", "ALData marketplace purchases", "Ponty purchases", "ponty shop"].includes(state.merchantCurrent?.reason || "") || body.suspend === true;
   }
   function configure(body: Record<string, unknown>, res: HttpResponse): unknown {
     if (typeof body.enabled !== "boolean") return res.status(400).json({ error: "invalid automatic fill setting" });

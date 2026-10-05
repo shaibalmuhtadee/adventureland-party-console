@@ -91,6 +91,8 @@ export type PartyState = {
   merchantRoutinePriorities?: Record<string, number>;
   merchantBlacklist?: Record<string, MerchantBlacklistEntry>;
   merchantAutomations?: Record<string, boolean>;
+  pontyShoppingList?: string[];
+  pontyShopLastRunAt?: number | null;
   giveawayRealms?: { key: string; label: string }[];
   giveawayPlayers?: Record<string, string[]>;
   standBids?: Record<string, StandBid>;

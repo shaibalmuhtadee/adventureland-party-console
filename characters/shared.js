@@ -7657,6 +7657,122 @@
     }
   }
 
+  async function merchantPontyShop(command) {
+    function currentRealm() { return "SR_" + parent.server_region + parent.server_identifier; }
+    function errorText(error) { return String(error.reason || error.message || error); }
+    async function jobState() {
+      var job = await request("/merchant/job/" + command.jobId);
+      if (job.commandId !== command.id || !runtimeCurrent()) throw new Error("Ponty Shop command superseded");
+      return job;
+    }
+    async function atPonty() {
+      await smart_move(find_npc("secondhands"));
+      if (character.map !== "main") throw new Error("Ponty Shop requires Mainland town");
+    }
+    async function changeRealm(realm) {
+      // Always leave from Mainland town; a bank floor must not become the next server's spawn.
+      await atPonty();
+      await jobState();
+      var response = await request("/merchant/realm-switch", { method: "POST", body: {
+        jobId: command.jobId, commandId: command.id, character: character.name, realm: realm,
+      }});
+      // The coordinator recreates this worker. Its retained command reads the durable trip on arrival.
+      if (!response.alreadyThere) await new Promise(function () {});
+    }
+    async function listings() {
+      var response = await get_secondhands(10000);
+      if (Array.isArray(response)) return response;
+      if (response && Array.isArray(response.items)) return response.items;
+      if (response && Array.isArray(response.secondhands)) return response.secondhands;
+      throw new Error("Ponty returned no shop inventory");
+    }
+    function price(item) {
+      return Math.max(1, Math.round(Number(calculate_item_value(item)) * (G.items[item.name] && G.items[item.name].cash ? 3 : 2))) * Math.max(1, Number(item.q) || 1);
+    }
+    async function scan(realm, job) {
+      var purchases = [], failures = [], wanted = new Set(job.pontyShoppingList || []);
+      var available = await listings();
+      for (var candidate of available) {
+        if (!candidate || candidate.b || !candidate.rid || !wanted.has(candidate.name)) continue;
+        if (job.pontyShop.attemptedListingKeys.includes(realm + ":" + String(candidate.rid))) continue;
+        try {
+          var live = candidate, cost = price(live), quantity = Math.max(1, Number(live.q) || 1);
+          if (!Number.isFinite(cost)) throw new Error("Ponty price is unavailable for " + live.name);
+          if (!purchasePreservesLogisticsReserve(live, quantity)) throw new Error("Three merchant logistics slots are reserved");
+          if (character.gold < cost) {
+            await merchantVisitBank(command, []);
+            var shortage = cost - character.gold;
+            if ((Number(character.bank && character.bank.gold) || 0) < shortage) throw new Error("Insufficient bank gold for " + live.name);
+            await withdrawMerchantCash(shortage, command);
+            await atPonty();
+            live = (await listings()).find(function (item) { return item && String(item.rid) === String(candidate.rid) && item.name === candidate.name && !item.b; });
+            if (!live) throw new Error("Ponty listing disappeared: " + candidate.name);
+            cost = price(live);
+            quantity = Math.max(1, Number(live.q) || 1);
+          }
+          await atPonty();
+          await jobState();
+          if (!Number.isFinite(cost) || character.gold < cost) throw new Error("Insufficient gold for " + live.name);
+          if (!purchasePreservesLogisticsReserve(live, quantity)) throw new Error("Three merchant logistics slots are reserved");
+          var claim = await request("/merchant/ponty-shop-progress", { method: "POST", body: {
+            jobId: command.jobId, commandId: command.id, character: character.name,
+            action: "claim", realm: realm, itemId: live.name, rid: String(live.rid),
+          }});
+          if (!claim.allowed) continue;
+          await buy_secondhand(String(live.rid), 10000);
+          purchases.push({ item: live.name, quantity: quantity, gold: cost });
+        } catch (error) {
+          failures.push(errorText(error));
+          // A funding detour can end in the bank even when the item could not be bought.
+          await atPonty();
+          await jobState();
+        }
+      }
+      return { purchases: purchases, error: failures.length ? failures.join("; ") : null };
+    }
+    try {
+      await nativeStandSync(command, true);
+      if (character.stand) await close_stand();
+      while (true) {
+        var job = await jobState();
+        var nextRealm = job.pontyShopRealms.find(function (realm) { return !job.pontyShop.scannedRealms.includes(realm); });
+        // Deleting the last shopping item ends this trip and still returns the merchant home.
+        if (!nextRealm || !(job.pontyShoppingList || []).length || !job.pontyShopEnabled) {
+          if (currentRealm() !== job.pontyShopHomeRealm) await changeRealm(job.pontyShopHomeRealm);
+          await atPonty();
+          await request("/merchant/complete", { method: "POST", body: {
+            jobId: command.jobId, commandId: command.id, success: true,
+            activity: [{ level: "success", message: "Ponty Shop finished and returned to the party server" }],
+          }});
+          return;
+        }
+        if (currentRealm() !== nextRealm) await changeRealm(nextRealm);
+        var result;
+        try {
+          await atPonty();
+          result = await scan(nextRealm, await jobState());
+        } catch (error) {
+          await jobState();
+          result = { purchases: [], error: errorText(error) };
+        }
+        await request("/merchant/ponty-shop-progress", { method: "POST", body: {
+          jobId: command.jobId, commandId: command.id, character: character.name,
+          action: "scanned", realm: nextRealm, purchases: result.purchases, error: result.error,
+        }});
+        var checkpoint = await request("/merchant/checkpoint", { method: "POST", body: {
+          jobId: command.jobId, commandId: command.id, state: {}, cycleBoundary: true,
+        }});
+        if (checkpoint.yield) return;
+      }
+    } catch (error) {
+      try { await request("/merchant/complete", { method: "POST", body: {
+        jobId: command.jobId, commandId: command.id, success: false, error: errorText(error),
+        activity: [{ level: "error", message: "Ponty Shop stopped", details: errorText(error) }],
+      }}); } catch (_completionError) { /* A newer command owns recovery. */ }
+      throw error;
+    }
+  }
+
   async function merchantPontyBuy(command) {
     var activity = [], purchases = command.listings || [], completed = [];
     var done = new Set(command.completedListingKeys || []);
@@ -9555,6 +9671,9 @@
       command, "stand purchase", function () { return afterCombat(function () {
         return merchantStandBuy(command);
       }, "stand purchase"); });
+    if (command.type === "merchant-ponty-shop" && character.ctype === "merchant") return runMerchantJob(
+      command, "Ponty Shop", function () { return merchantPontyShop(command); }
+    );
     if (command.type === "merchant-ponty-buy" && character.ctype === "merchant") return runMerchantJob(
       command, "Ponty purchase", function () { return afterCombat(function () {
         return merchantPontyBuy(command);

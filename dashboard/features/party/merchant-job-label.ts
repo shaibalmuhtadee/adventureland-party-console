@@ -16,6 +16,7 @@ const labels: Record<string, string> = {
   'manual bank exchange': 'Bank exchange',
   'stand maintenance': 'Stand maintenance',
   'merchant idle': 'Idle',
+  'ponty shop': 'Ponty Shop',
   restock: 'Party restock',
   'merchant donation': 'Donate gold',
   'merchant luck': "Merchant's Luck",

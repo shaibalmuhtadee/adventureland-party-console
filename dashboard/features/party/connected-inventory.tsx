@@ -198,6 +198,9 @@ export const ConnectedInventory = memo(function ConnectedInventory({
       onRetryDeconstruction={onRetryDeconstruction}
       onRemoveNpcSale={onRemoveNpcSale}
       autoStandMarks={state.autoStandMarks || emptyRecord()}
+      pontyShoppingList={state.pontyShoppingList || emptyArray()}
+      onRemovePonty={itemId => void post('/merchant/ponty-shopping-list', { itemId, remove: true })}
+      onClearPonty={async () => { await post('/merchant/ponty-shopping-list', { clear: true }); }}
       buyable={state.merchantCatalog?.buyable || emptyArray()}
       catalog={state.merchantCatalog?.allItems || emptyArray()}
       priceHistory={state.standPriceHistory || emptyRecord()}

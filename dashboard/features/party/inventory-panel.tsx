@@ -107,6 +107,9 @@ export const InventoryPanel = memo(function InventoryPanel({
   onRetryDeconstruction,
   onRemoveNpcSale,
   autoStandMarks,
+  pontyShoppingList = [],
+  onRemovePonty,
+  onClearPonty,
   buyable,
   catalog,
   priceHistory,
@@ -154,6 +157,9 @@ export const InventoryPanel = memo(function InventoryPanel({
   onRemoveNpcSale?: (id: string) => void;
   autoNpcSales: Record<string, { item: Item; createdAt: number; character?: string }>;
   autoStandMarks: Record<string, { item: Item; price: number; createdAt: number }>;
+  pontyShoppingList?: string[];
+  onRemovePonty?: (itemId: string) => void;
+  onClearPonty?: () => Promise<void>;
   buyable: MerchantBuyItem[];
   catalog: MerchantCatalogItem[];
   priceHistory: Record<string, StandPriceHistory>;
@@ -215,7 +221,7 @@ export const InventoryPanel = memo(function InventoryPanel({
   const nextUpgradeSlot = validLuckySlot(luckyUpgradeSlot) ? luckyUpgradeSlot :
     luckySlotSearch(luckySlotTracking || {version: 1, slots: {}}).nextSlot;
   const luckySlotLabel = validLuckySlot(luckyUpgradeSlot) ? "Verified lucky upgrade slot" : "Next upgrade will test for lucky upgrade";
-  type AutomaticSection = "npc" | "npc-manual" | "stand" | "upgrade" | "compound" | "merchant" | "bank" | "deconstruction";
+  type AutomaticSection = "npc" | "npc-manual" | "stand" | "upgrade" | "compound" | "merchant" | "bank" | "deconstruction" | "ponty";
   const [openAutomaticSections, setOpenAutomaticSections] = useState<
     Partial<Record<AutomaticSection, boolean>>
   >({});
@@ -528,6 +534,7 @@ export const InventoryPanel = memo(function InventoryPanel({
   );
   const clearAutomaticSection = async (section: AutomaticSection) => {
     if (section === "npc" || section === "stand") onClearAutomaticSales(section);
+    else if (section === "ponty") await onClearPonty?.();
     else if (section === "compound") await onCommand(character.name, "clear-auto-compounds");
     else if (section === "upgrade") await onCommand(character.name, "clear-auto-upgrades");
     else if (section === "deconstruction") {
@@ -1086,6 +1093,10 @@ export const InventoryPanel = memo(function InventoryPanel({
         </div>
       )}
       <div className={`${character.name !== merchant ? "mt-2" : "mt-5"} grid gap-2`}>
+        {automaticSection('ponty', 'Ponty shopping list', <ShoppingCart className="h-4 w-4" />,
+          'border-cyan-800 text-cyan-300', pontyShoppingList.map(itemId => ({
+            key: itemId, item: { name: itemId }, onRemove: () => onRemovePonty?.(itemId),
+          })))}
         {automaticSection(
               "npc",
               "Auto NPC sales",

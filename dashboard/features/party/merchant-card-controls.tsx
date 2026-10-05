@@ -58,11 +58,13 @@ export const MerchantCardControls = memo(function MerchantCardControls({
 }) {
   const now = useClock();
   const action = usePartyAction();
+  const pontyAction = usePartyAction();
   const [activityOpen, setActivityOpen] = useState(false);
   const client = useQueryClient(), visible = useVisible();
   const logs = useQueries({ queries: [{ ...domainOptions(client, 'logs'), enabled: visible }].filter(() => activityOpen) })[0];
   const state = { ...baseState, ...logs?.data };
   const [cleanupResult, setCleanupResult] = useState<string | null>(null);
+  const [pontyResult, setPontyResult] = useState<string | null>(null);
   const merchant = state.merchantCharacter ? state.characters[state.merchantCharacter] : null;
   const readiness = (mode: "fishing" | "mining") => {
     const remaining = Math.max(
@@ -159,7 +161,7 @@ export const MerchantCardControls = memo(function MerchantCardControls({
           <summary className="cursor-pointer font-mono text-[10px] uppercase text-amber-300">
             Activity
           </summary>
-          <div className="mt-2 flex items-center justify-end gap-2">
+          <div className="mt-2 flex flex-wrap items-center justify-end gap-2">
             {cleanupResult ? (
               <span className="mr-auto font-mono text-[9px] text-emerald-300">{cleanupResult}</span>
             ) : null}
@@ -302,8 +304,21 @@ export const MerchantCardControls = memo(function MerchantCardControls({
           <X className="mr-1.5 h-3.5 w-3.5" />
           Clear job queue
         </Button>
+        <Button type="button" variant="outline"
+          disabled={pontyAction.isPending}
+          title={state.pontyShopLastRunAt ? `Last started ${new Date(state.pontyShopLastRunAt).toLocaleString()}` : 'Check Ponty on all 11 servers'}
+          className="h-9 border-cyan-700 bg-[#07100f] text-xs text-cyan-200 hover:border-cyan-400 hover:bg-cyan-950 hover:text-white disabled:text-slate-400"
+          onClick={async () => {
+            try {
+              const result = await pontyAction.mutateAsync({ path: '/merchant/ponty-shop', body: {} });
+              setPontyResult(result.alreadyRunning === true ? 'Ponty Shop is already running' : 'Ponty Shop queued');
+            } catch (error) { setPontyResult(error instanceof Error ? error.message : 'Could not start Ponty Shop'); }
+          }}>
+          <ShoppingCart className="mr-1.5 h-3.5 w-3.5" /> Ponty Shop
+        </Button>
         <MerchantCollectionSettings buyUpgradeBatchSize={state.buyUpgradeBatchSize} {...collectionSettings} merchantStandLocation={state.merchantStandLocation} bankSortState={state} deliveryTripsEnabled={state.merchantAutomations?.deliveries !== false} withdrawalTripsEnabled={state.merchantAutomations?.withdrawals !== false} />
       </div>
+      {pontyResult ? <p role="status" className="mt-2 font-mono text-[10px] text-cyan-200">{pontyResult}</p> : null}
 
     </section>
   );

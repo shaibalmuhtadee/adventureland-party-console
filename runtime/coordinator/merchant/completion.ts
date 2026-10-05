@@ -59,6 +59,7 @@ export function createMerchantCompletion(state: CompletionState, ports: Completi
     });
   }
   function finish(job: CompletionJob): void {
+    if (job.reason === "ponty shop") ports.ensureHome("Ponty Shop completion");
     if (job.reason === "ALData marketplace sales") ports.ensureHome("WTB completion");
     if (job.reason === "join giveaway") ports.ensureHome("giveaway completion");
     ports.persistBank();

@@ -28,6 +28,7 @@ interface AnniversaryControl {
 }
 export interface DispatchPorts {
   productionPending?(): {id: string; name: string; level: number; kind: string}[];
+  started?(job: MerchantWork): void;
   eventReserved?(): boolean;
   enabled?(job: MerchantWork): boolean;
   travel?(realm: string): Promise<unknown>;
@@ -185,6 +186,7 @@ export function createMerchantDispatcher(state: DispatchState, ports: DispatchPo
   }
 
   function assign(job: MerchantWork, status: ServiceStatus): void {
+    ports.started?.(job);
     planPonty(job);
     const commandId = ports.nextCommand();
     if (buyUpgradeOrder(job)) {
