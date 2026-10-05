@@ -2185,6 +2185,10 @@
   }
   function previewSuppliesKey() { return "party-preview-supplies:"+character.name; }
   async function previewTravel(destination) {
+    if (destination === "newupgrade" && merchantUsesComputer()) {
+      await computerSmartMove(destination);
+      return;
+    }
     if(character.map===destination)return;
     var npc=typeof find_npc==="function"?find_npc(destination):null;
     if(npc && (!npc.map || npc.map===character.map) && Math.hypot(character.x-npc.x,character.y-npc.y)<=35)return;
@@ -3336,7 +3340,7 @@
     try {
       var vendor = find_npc("fancypots");
       if (!vendor) throw new Error("fancypots vendor not found");
-      await smart_move(vendor);
+      await computerSmartMove(vendor);
       currentQuantity = quantity(potionName);
       needed = Math.max(0, targetQuantity - currentQuantity);
       if (needed && character.gold >= potion.g * needed) {
@@ -3375,6 +3379,21 @@
         return npcId;
     }
     return null;
+  }
+
+  function merchantUsesComputer() {
+    return (character.items || []).some(function (item) {
+      return item && (item.name === "computer" || item.name === "supercomputer");
+    });
+  }
+  // Computers allow remote NPC work, but it must happen outside every bank floor.
+  // Bank visits and player trades keep their ordinary movement paths.
+  async function computerSmartMove(destination) {
+    if (merchantUsesComputer()) {
+      if (bankSortMap(character.map)) await smart_move("main");
+      return;
+    }
+    await smart_move(destination);
   }
 
   async function upgradeMarked(marks, compoundGroups, purchases, returnLocation) {
@@ -3460,18 +3479,18 @@
           purchased.push(purchase);
           continue;
         }
-        await smart_move(find_npc(seller));
+        await computerSmartMove(find_npc(seller));
         await buy(purchase.name, 1);
         purchased.push(purchase);
       }
       if (goldNeeded) {
-        await smart_move(find_npc("scrolls"));
+        await computerSmartMove(find_npc("scrolls"));
         for (var scroll in required) {
           var missing = Math.max(0, required[scroll] - inventoryQuantity(scroll));
           if (missing) await buy(scroll, missing);
         }
       }
-      await smart_move(find_npc("newupgrade"));
+      await computerSmartMove(find_npc("newupgrade"));
       for (var i = 0; i < work.length; i += 1) {
         var itemSlot = findMarkedItem(work[i].mark);
         for (var step = 0; step < work[i].tiers; step += 1) {
@@ -5536,7 +5555,7 @@
       if (!seller || !G.items[purchase.name]) { activity.push({ level: "error", message: "No seller for " + (purchase && purchase.name) }); continue; }
       var purchasePrice = G.items[purchase.name].g || 0;
       if (character.gold < purchasePrice) { await merchantVisitBank(command, activity); await withdrawMerchantCash(Math.min(purchasePrice - character.gold, Number(character.bank && character.bank.gold) || 0), command); }
-      await smart_move(find_npc(seller)); await buyConfirmed(purchase.name, 1);
+      await computerSmartMove(find_npc(seller)); await buyConfirmed(purchase.name, 1);
       var purchasedSlot = character.items.findIndex(function (item, index) { return !used[index] && item && item.name === purchase.name && (item.level || 0) === 0; });
       if (purchasedSlot >= 0) { used[purchasedSlot] = true; returns.push(purchasedSlot); }
     }
@@ -5567,7 +5586,7 @@
           await ensureOwnedItemQuantity(scrollName, refillNeeds[scrollName] || 1, command, activity);
           scrollSlot = findInventoryItemByName(scrollName);
         }
-        await smart_move(find_npc("newupgrade"));
+        await computerSmartMove(find_npc("newupgrade"));
         try {
           var before = character.items[slot].level || 0;
           var outcome = await upgradeConfirmed(slot, scrollSlot, undefined, undefined, mark.auto ? {family:"upgrade",key:mark.item.name+"@+"+(mark.item.level||0),mark:Object.assign({},mark,{slot:slot,equipped:false})} : undefined, offeringAttempt);
@@ -5611,7 +5630,7 @@
         await ensureOwnedItemQuantity(cscroll, 1, command, activity);
         cscrollSlot = findInventoryItemByName(cscroll);
       }
-      await smart_move(find_npc("newupgrade"));
+      await computerSmartMove(find_npc("newupgrade"));
       try {
         await compoundConfirmed(slots[0], slots[1], slots[2], cscrollSlot);
         var resultSlot = sameItem(character.items[slots[0]], {
@@ -5670,7 +5689,7 @@
             scrollSlot = findInventoryItemByName(scrollName);
           }
           await merchantOperationStage(command, "processing");
-          await smart_move(find_npc("newupgrade"));
+          await computerSmartMove(find_npc("newupgrade"));
           await refreshCompoundProtection(command);
           candidates = compoundInventorySlots(command, autoMark.name, level);
           if (candidates.length < 3) continue;
@@ -5823,7 +5842,7 @@
         throw new Error("Insufficient bank gold for " + missing + " × " + name);
       await withdrawMerchantCash(shortfall, command);
     }
-    await smart_move(find_npc("scrolls"));
+    await computerSmartMove(find_npc("scrolls"));
     await buyConfirmed(name, missing);
     return itemAvailability(name);
   }
@@ -5854,7 +5873,7 @@
       await withdrawMerchantCash(neededGold, command);
     }
     if (names.some(function (name) { return missing[name] > 0; })) {
-      await smart_move(find_npc("scrolls"));
+      await computerSmartMove(find_npc("scrolls"));
       for (var buyIndex = 0; buyIndex < names.length; buyIndex += 1)
         if (missing[names[buyIndex]] > 0) await buyConfirmed(names[buyIndex], missing[names[buyIndex]]);
     }
@@ -5907,7 +5926,7 @@
       }
     }
     if (names.some(function (name) { return purchasableStatScrolls[name] && itemAvailability(name).onPlayer < needs[name]; }))
-      await smart_move(find_npc("scrolls"));
+      await computerSmartMove(find_npc("scrolls"));
     for (var b = 0; b < names.length; b += 1) {
       if (!purchasableStatScrolls[names[b]]) continue;
       var buyCount = Math.max(0, needs[names[b]] - itemAvailability(names[b]).onPlayer);
@@ -5937,7 +5956,7 @@
         continue;
       }
       try {
-        await smart_move(find_npc("newupgrade"));
+        await computerSmartMove(find_npc("newupgrade"));
         await upgrade(itemSlot, scrollSlot);
         if (character.items[itemSlot]) {
           var completed = fingerprint(character.items[itemSlot]);
@@ -5990,7 +6009,7 @@
     try {
       // Travel while fully equipped. At the shrine, expose only one piece at a
       // time and put it straight back on before touching the next one.
-      await smart_move(find_npc("newupgrade"));
+      await computerSmartMove(find_npc("newupgrade"));
       for (var i = 0; i < (command.items || []).length; i += 1) {
         var mark = command.items[i];
         if (!mark || typeof mark.slot !== "string" || !sameItemState(character.slots[mark.slot], mark.item)) {
@@ -6190,7 +6209,7 @@
             var buyQuantity = Math.max(0, needed - inventoryQuantity(supply.item));
             if (character.gold >= G.items[supply.item].g * buyQuantity) {
               if (buyQuantity) {
-                await smart_move(find_npc(seller));
+                await computerSmartMove(find_npc(seller));
                 await buyConfirmed(supply.item, buyQuantity);
               }
               deliveries.push({ name: supply.item, quantity: needed });
@@ -6861,7 +6880,7 @@
           Number.isFinite(Number(point.x)) && Number.isFinite(Number(point.y)) &&
           Math.hypot(character.x - Number(point.x), character.y - Number(point.y)) <= 35)
         return;
-      try { await smart_move(destination); }
+      try { await computerSmartMove(destination); }
       catch (error) { error.commerceMovement = true; throw error; }
       command._commerceMovementSucceeded = true;
     }
@@ -7421,7 +7440,7 @@
           if (exactInventoryQuantity(pendingLine.id, pendingLine.level) < pendingRequired)
             throw new Error("Exchange inventory changed before travel: " + pendingLine.id);
         }
-        await smart_move(find_npc(line.reward ? itemDefinition.npc || line.id + "s" : exchangeNpc(line.id)));
+        await computerSmartMove(find_npc(line.reward ? itemDefinition.npc || line.id + "s" : exchangeNpc(line.id)));
         for (var count = 0; count < Math.max(1, Number(line.quantity) || 1); count += 1) {
           var slot = character.items.findIndex(function (item) {
             return item && item.name === line.id && (Number(item.level) || 0) === (Number(line.level) || 0) &&
@@ -8127,7 +8146,7 @@
       for (var index = 0; index < needs.length; index += 1) {
         var request = needs[index], seller = itemSeller(request.supply.item);
         if (!seller) throw new Error("Could not find potion seller for " + request.supply.item);
-        await smart_move(find_npc(seller));
+        await computerSmartMove(find_npc(seller));
         await buyConfirmed(request.supply.item, request.quantity);
         activity.push({ level: "success", message: "Restocked " + request.quantity + " × " +
           (G.items[request.supply.item] && G.items[request.supply.item].name || request.supply.item) +
@@ -8209,7 +8228,7 @@
     var activity = [];
     try {
       if (character.stand) await close_stand();
-      await smart_move("craftsman");
+      await computerSmartMove("craftsman");
       for (var mark of command.deconstructionMarks || []) {
         for (var unit = 0; unit < mark.quantity; unit += 1) {
           assertMerchantContinuation(command);
@@ -8226,7 +8245,7 @@
               assertMerchantContinuation(command);
               await withdrawMerchantCash(definition.cost - character.gold, command);
               if (character.gold < definition.cost) throw new Error("Insufficient gold: deconstruction needs " + definition.cost);
-              await smart_move("craftsman");
+              await computerSmartMove("craftsman");
               assertMerchantContinuation(command);
               slot = findItem(mark.item);
               item = character.items[slot];
@@ -8283,7 +8302,7 @@
         if (character.items[inventorySlot].l) { blocked.push({id:mark.id,error:"Item is locked"}); continue; }
         var quantity = Math.min(Number(mark.quantity) || 1, Number(character.items[inventorySlot].q) || 1);
         // Named NPC destinations include the walkable interaction offset.
-        await smart_move("fancypots");
+        await computerSmartMove("fancypots");
         inventorySlot = findItem(mark.item);
         if (inventorySlot < 0 || !sameItem(character.items[inventorySlot], mark.item))
           throw new Error("NPC-sale item moved before confirmation: " + mark.item.name);
