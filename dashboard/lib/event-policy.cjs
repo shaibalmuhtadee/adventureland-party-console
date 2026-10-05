@@ -29,6 +29,9 @@ __export(event_policy_exports, {
 });
 module.exports = __toCommonJS(event_policy_exports);
 var supportedEvents = ["anniversary", "abtesting", "goobrawl", "crabxx", "franky", "icegolem", "snowman", "halloween"];
+function merchantCombatEnabled(party, name) {
+  return name !== party.merchantCharacter || party.merchantEventCombatEnabled === true;
+}
 function selectedEvents(party, name) {
   const source = eventPolicy(party, name).source;
   const saved = party.eventSelectionsByCharacter?.[source];
@@ -36,6 +39,7 @@ function selectedEvents(party, name) {
   return selections.filter((id) => supportedEvents.includes(id));
 }
 function eventEnabled(party, name, event) {
+  if (event !== "anniversary" && !merchantCombatEnabled(party, name)) return false;
   return selectedEvents(party, name).includes(event);
 }
 function eventPolicy(party, name) {
@@ -46,6 +50,6 @@ function eventPolicy(party, name) {
   return {
     inherited,
     source,
-    enabled: party.eventSelectionsByCharacter?.[source] ? party.eventSelectionsByCharacter[source].some((id) => id !== "anniversary" && supportedEvents.includes(id)) : Boolean(party.eventsByCharacter?.[source])
+    enabled: !merchantCombatEnabled(party, name) ? false : party.eventSelectionsByCharacter?.[source] ? party.eventSelectionsByCharacter[source].some((id) => id !== "anniversary" && supportedEvents.includes(id)) : Boolean(party.eventsByCharacter?.[source])
   };
 }

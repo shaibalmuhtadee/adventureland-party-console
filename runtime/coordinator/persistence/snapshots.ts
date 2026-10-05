@@ -105,6 +105,7 @@ export const settingsFields = [
   "restockPolicies",
   "merchantCharacter",
   "merchantForceStand",
+  "merchantEventCombatEnabled",
   "merchantStandLocation",
   "merchantWeapon",
   "luckyUpgradeSlots",

@@ -425,7 +425,11 @@
   var travellingEventName = null, eventSelectionRevision = 0;
   var eventClockOffset = 0, eventClockSyncedAt = 0, eventClockRequest = null;
   var eventFeedAt = Date.now(), eventClockTimer = null;
-  function eventSelected(name) { return enabledEventSelections === null ? name === "anniversary" || eventsEnabled : enabledEventSelections.indexOf(name) >= 0; }
+  var merchantEventCombatEnabled = false;
+  function eventSelected(name) {
+    if (character.ctype === "merchant" && name !== "anniversary" && !merchantEventCombatEnabled) return false;
+    return enabledEventSelections === null ? name === "anniversary" || eventsEnabled : enabledEventSelections.indexOf(name) >= 0;
+  }
   function receiveEventFeed() { eventFeedAt = Date.now(); }
   function receiveEventClock(data) {
     if (!eventClockRequest) return;
@@ -497,9 +501,19 @@
   }
   function halloweenTargetAllowed(target) {
     var commitment = halloweenCommitment();
-    return !!commitment && !!target && target.type === "monster" && target.mtype === commitment.encounter.type &&
+    return !!commitment && !!target && target.type === "monster" && halloweenTargetTypes(commitment).indexOf(target.mtype) >= 0 &&
       target.visible !== false && !target.dead && target.hp > 0 && (!target.map || target.map === character.map) &&
+      (target.mtype !== "jr" || character.map === commitment.encounter.map) &&
       (target.in == null || target.in === character.in) && halloweenMerchantSafe(target);
+  }
+  function halloweenTargetTypes(commitment) {
+    if (!commitment) return [];
+    return commitment.encounter.type === "mrpumpkin" ? ["jr", "mrpumpkin"] : [commitment.encounter.type];
+  }
+  function halloweenPriorityTarget() {
+    if (character.cave || escapeOwns() || eventExitOwnsMovement() || !halloweenOwnsCombat()) return null;
+    var target = nearestEventTarget();
+    return target && target.mtype === "jr" && isAllowedTarget(target) ? target : null;
   }
   function halloweenOwnsCombat() {
     return eventSelected("halloween") && (joinedEvent === "halloween" || travellingEventName === "halloween");
@@ -507,7 +521,7 @@
   function halloweenCombatEvent() {
     var commitment = halloweenCommitment();
     if (!commitment || !eventSelected("halloween") || !halloweenMerchantSafe()) return null;
-    return { name: "halloween", state: commitment.encounter, types: [commitment.encounter.type],
+    return { name: "halloween", state: commitment.encounter, types: halloweenTargetTypes(commitment),
       generation: commitment.generation, kind: "monster" };
   }
   var eventReturnPending = false;
@@ -10332,8 +10346,16 @@
       var previousSelections = enabledEventSelections;
       statusPhase = "apply event selections";
       enabledEventSelections = Array.isArray(state.eventSelections) ? state.eventSelections : null;
+      merchantEventCombatEnabled = state.merchantEventCombatEnabled === true;
+      if (character.ctype === "merchant" && !merchantEventCombatEnabled && enabledEventSelections)
+        enabledEventSelections = enabledEventSelections.filter(function(name) { return name === "anniversary"; });
       eventsEnabled = !!state.eventsEnabled;
       root.__merchantCoordinatorEventRecovery = !!state.merchantEventRecoveryReserved;
+      // A reconnect must also withdraw a persisted combat session when disabled.
+      var disabledMerchantEvent = character.ctype === "merchant" && !merchantEventCombatEnabled &&
+        state.merchantCombatEvent !== "anniversary" && state.merchantCombatEvent;
+      if (disabledMerchantEvent && pendingEventDisables.indexOf(disabledMerchantEvent) < 0)
+        pendingEventDisables.push(disabledMerchantEvent);
       if (previousSelections && enabledEventSelections && previousSelections.join(",") !== enabledEventSelections.join(",")) {
         eventSelectionRevision++;
         pendingEventDisables = root.__partyPendingEventDisables = Array.from(new Set(pendingEventDisables.concat(previousSelections.filter(function(id) { return !eventSelected(id); }))));
@@ -10351,7 +10373,7 @@
             anniversaryStage = "anniversary disabled; resuming previous activity";
             var disabledResult = await request("/event-disabled", { method: "POST", body: { character: character.name, event: disabledEvent } });
             if (disabledResult.anniversary) anniversaryPlan = disabledResult.anniversary;
-          } else if (disabledEvent === joinedEvent || disabledEvent === partyEventHint || disabledEvent === travellingEventName) {
+          } else if (disabledEvent === joinedEvent || disabledEvent === partyEventHint || disabledEvent === travellingEventName || disabledEvent === disabledMerchantEvent) {
             if (!convoyTraveling && !forceTraveling && !townTraveling) { try { await stop("smart"); await stop(); } catch (_disabledTravel) {} }
             await request("/event-disabled", { method: "POST", body: { character: character.name, event: disabledEvent } });
             eventTargetTypes = []; joinedEvent = null; root.__partyJoinedEvent = null;
@@ -11680,7 +11702,7 @@
   function eventMonsterTypes(eventName) {
     if (eventName === "halloween") {
       var commitment = halloweenCommitment();
-      return commitment ? [commitment.encounter.type] : [];
+      return halloweenTargetTypes(commitment);
     }
     var definition = G.events && G.events[eventName];
     var candidates = [];
@@ -11826,7 +11848,12 @@
   function nearestEventTarget() {
     if (joinedEvent && !eventSelected(joinedEvent) || travellingEventName && !eventSelected(travellingEventName)) return null;
     if (halloweenOwnsCombat()) {
-      var halloweenTargets = Object.values(parent.entities || {}).filter(halloweenTargetAllowed);
+      var halloweenTargets = Object.values(parent.entities || {}).filter(function(target) {
+        return halloweenTargetAllowed(target) && !(root.partyRoleRunner && root.partyRoleRunner.isKnownDead(target.id));
+      });
+      // Mr. Pumpkin's adds interrupt boss damage, including an engaged boss.
+      var juniors = halloweenTargets.filter(function(target) { return target.mtype === "jr"; });
+      if (juniors.length) halloweenTargets = juniors;
       var retainedHalloween = halloweenTargets.find(function(target) { return target.id === combatTargetId; });
       halloweenTargets.sort(function(a, b) { return distance(character, a) - distance(character, b) || String(a.id).localeCompare(String(b.id)); });
       return retainedHalloween || halloweenTargets[0] || null;
@@ -15868,7 +15895,7 @@
     },
     isBanking: function () { return banking || bankQueued; },
     merchantEventCombatActive: function () {
-      return character.ctype === "merchant" && !!joinedEvent && eventSelected(joinedEvent) &&
+      return character.ctype === "merchant" && merchantEventCombatEnabled && !!joinedEvent && eventSelected(joinedEvent) &&
         !eventReturnPending && !root.__merchantActiveJob;
     },
     dungeonOwned: dungeonOwned,
@@ -16323,6 +16350,7 @@
     isAttackingPartyMember: isAttackingPartyMember,
     allowsTarget: isAllowedTarget,
     getEventTarget: nearestEventTarget,
+    getPriorityEventTarget: halloweenPriorityTarget,
     frankyCombatActive: frankyCombatActive,
     frankyMovementTick: frankyMovementTick,
     isAggressiveEventCombat: isAggressiveEventCombat,

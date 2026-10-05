@@ -12,7 +12,20 @@ destination without changing the encounter.
 When neither boss remains, the existing event recovery resumes farming or Hunt.
 Unchecking Halloween returns actual participants while the boss may remain alive.
 
-Merchants attend only while another character holds the boss's aggro, retain
+During Mr. Pumpkin attendance, visible living `jr` adds take priority over the
+boss. Their appearance replaces an engaged Mr. Pumpkin target; once no eligible
+`jr` remains, the selector resumes the boss. Adds stay within the current map and
+instance and do not change the coordinator's committed encounter or travel route.
+Merchants retain the requirement that another character holds their target's aggro.
+
+The merchant's Events dropdown has an **Attack during events** checkbox, off by
+default. It controls combat attendance for all selected events, including
+Halloween, while preserving those selections. Enable it when the merchant is
+equipped for combat. Turning it off during attendance stops attacking and uses
+the existing event return flow. The setting persists across restarts and dashboard
+export/import. Anniversary activities do not require this combat toggle.
+
+Enabled merchants attend only while another character holds the boss's aggro, retain
 their current weapon, and yield inventory work at existing safe checkpoints.
 Loss of that aggro protection requests the merchant's own event return.
 Server hopping, Slenderman hunting, and candy exchanges are not part of attendance.

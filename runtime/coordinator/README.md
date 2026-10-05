@@ -1251,7 +1251,11 @@ The dashboard core publishes `gameVersion` and `clientUpdate`. The header displa
 that coordinator-selected version without changing header layout height.
 
 
-Merchants can independently select all supported events. Combat attendance uses
+Merchants can independently select all supported events. The merchant card's
+Events dropdown includes **Attack during events**, disabled by default and stored
+as `merchantEventCombatEnabled`. Disabling it preserves selections, stops combat
+and invokes the existing event return flow. Anniversary activities remain eligible.
+The setting is saved and included in dashboard export/import. Combat attendance uses
 current equipment and the normal attack controller, without enabling farming.
 New merchant jobs, gathering, and stand work pause while event ownership is
 active. Production yields before its next admission and crafting uses durable

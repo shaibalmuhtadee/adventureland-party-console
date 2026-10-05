@@ -37,6 +37,7 @@ export const heartbeatStateFields = [
   "abtestingStrategy",
   "merchantCharacter",
   "merchantForceStand",
+  "merchantEventCombatEnabled",
   "merchantStandLocation",
   "merchantWeapon",
   "luckyUpgradeSlots",
@@ -64,6 +65,7 @@ export interface HeartbeatState extends Record<(typeof heartbeatStateFields)[num
   huntEventTrips?: import("../events/hunt-trip.ts").HuntEventTrips["huntEventTrips"];
   leader: string | null;
   merchantCharacter: string | null;
+  merchantEventCombatEnabled: boolean;
   merchantStandLocation: import('../merchant/stand-location.ts').MerchantStandLocation | null;
   commands: Record<string, MerchantCommand | undefined>;
   statuses: Record<string, HeartbeatStatus | undefined>;

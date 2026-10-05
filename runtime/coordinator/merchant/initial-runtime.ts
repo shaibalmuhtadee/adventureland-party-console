@@ -11,6 +11,7 @@ interface SavedMerchant extends Partial<BankSortState> {
   luckySlotTracking?: LuckySlotHistory;
   merchantCharacter?: string | null;
   merchantForceStand?: unknown;
+  merchantEventCombatEnabled?: boolean;
   merchantStandLocation?: MerchantStandLocation;
   merchantWeapon?: Parameters<typeof createMerchantItemCommands>[0]["merchantWeapon"];
   merchantQueue?: MerchantWork[] | null;
@@ -35,6 +36,7 @@ export function initialMerchantRuntime<DefaultMerchant extends string | null = s
     luckyUpgradeSlots,
     luckySlotTracking: saved.luckySlotTracking || {},
     merchantForceStand: saved.merchantForceStand === true,
+    merchantEventCombatEnabled: saved.merchantEventCombatEnabled === true,
     merchantStandLocation: validStandLocation(saved.merchantStandLocation) ? {...saved.merchantStandLocation} : null,
     merchantWeapon: saved.merchantWeapon || null,
     merchantQueue: Array.isArray(saved.merchantQueue) ? saved.merchantQueue : [],

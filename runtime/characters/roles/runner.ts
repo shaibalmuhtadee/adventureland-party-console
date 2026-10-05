@@ -147,6 +147,22 @@ export function installRoleRunner(
     if (!target && !exclusiveCombat() && sharedRoutine.getFarmingMode() !== "scatter" && !sharedRoutine.usesGroupedCombat?.())
       await sharedRoutine.followLeaderIfFar(150);
   }
+  function retainCurrentTarget(current: Target | null, priority: Target | null | undefined): boolean {
+    if (!current || invalidated || sharedRoutine.returnCombatActive?.()) return false;
+    if (priority && priority.id !== selectedTarget) return false;
+    return !encounterTargetChanged();
+  }
+  function encounterTargetChanged(): boolean {
+    const dungeon = sharedRoutine.dungeonOwned?.();
+    const rare = dungeon ? null : sharedRoutine.getRareTarget?.();
+    if (rare && rare.id !== selectedTarget) return true;
+    return formationTargetChanged(dungeon);
+  }
+  function formationTargetChanged(dungeon: boolean | undefined): boolean {
+    if (dungeon) return sharedRoutine.getDungeonTarget?.()?.id !== selectedTarget;
+    if (sharedRoutine.usesLeaderTarget?.()) return sharedRoutine.getGroupedTarget()?.id !== selectedTarget;
+    return false;
+  }
   async function selectTarget() {
     if (selecting || !active) return;
     if (!combatAllowed()) {
@@ -156,6 +172,7 @@ export function installRoleRunner(
       return;
     }
     const current = currentTarget();
+    const priorityEventTarget = sharedRoutine.getPriorityEventTarget?.();
     const closer = !exclusiveCombat() && current && !attacks.hasStarted(current.id) && sharedRoutine.getCloserHuntTarget?.(current);
     if (closer) {
       root.sharedRoutine?.resetCombatMovement?.();
@@ -163,16 +180,12 @@ export function installRoleRunner(
       attacks.wake();
       return;
     }
-    if (!sharedRoutine.returnCombatActive?.() && !invalidated && current) {
-      const rare = sharedRoutine.dungeonOwned?.() ? null : sharedRoutine.getRareTarget?.();
-      const nominated = sharedRoutine.dungeonOwned?.() ? sharedRoutine.getDungeonTarget?.() : sharedRoutine.usesLeaderTarget?.() ? sharedRoutine.getGroupedTarget() : null;
-      if ((!rare || rare.id === selectedTarget) && (!(sharedRoutine.dungeonOwned?.() || sharedRoutine.usesLeaderTarget?.()) || nominated?.id === selectedTarget)) return;
-    }
+    if (retainCurrentTarget(current, priorityEventTarget)) return;
     invalidated = false;
     selecting = true;
     const epoch = generation;
     try {
-      const selected = chooseTarget();
+      const selected = priorityEventTarget || chooseTarget();
       if (!currentEpoch(epoch) || !combatAllowed()) return;
       const target = selected && !killed.has(selected.id) ? eligibleSelection(selected) : null;
       await publishSelection(target);

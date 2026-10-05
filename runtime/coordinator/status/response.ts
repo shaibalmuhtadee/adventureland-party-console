@@ -2,7 +2,7 @@ import {collectPassing} from '../../combat/passing.ts';
 import {passingControl} from '../../combat/passing-admission.ts';
 import {outboundHunt} from '../../combat/hunt-travel.ts';
 import { merchantEventRecoveryReserved } from '../merchant/event-control.ts';
-import { selectedEvents } from '../../../dashboard/lib/event-policy.ts';
+import { eventEnabled } from '../../../dashboard/lib/event-policy.ts';
 import { createHalloweenAttendance } from '../events/halloween.ts';
 import type {Member} from '../../combat/grouped.ts';
 import { monsterFocus, needsCatalog, partyResponse } from "./response-party.ts";
@@ -60,7 +60,7 @@ const navigationCommands = new Set([
 /** Long-running commands remain deliverable until their completion endpoint acknowledges them. */
 export function createHeartbeatResponse(state: HeartbeatState, ports: HeartbeatResponsePorts) {
   const halloween = createHalloweenAttendance(state, {
-    now: () => ports.now(), selected: name => selectedEvents(state, name).includes('halloween'),
+    now: () => ports.now(), selected: name => eventEnabled(state, name, 'halloween'),
     persist: () => ports.persist?.(),
   });
   function restoreTownCommand(name: string): void {
@@ -205,7 +205,10 @@ export function createHeartbeatResponse(state: HeartbeatState, ports: HeartbeatR
       convoySignal: ports.convoySignal(name),
       ...travelResponse(name),
       ...merchantResponse(name),
-      ...(name === state.merchantCharacter ? { merchantEventRecoveryReserved: merchantEventRecoveryReserved(state) } : {}),
+      ...(name === state.merchantCharacter ? {
+        merchantEventRecoveryReserved: merchantEventRecoveryReserved(state),
+        merchantCombatEvent: state.eventSessions?.[name]?.event || null,
+      } : {}),
       ...partyResponse(state, names, leader),
       groupedCombat: ports.groupedCombat(),
         passingEncounters: passingReports(),

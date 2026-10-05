@@ -3,6 +3,7 @@ import { requestObject, requestText, type HttpRequest, type HttpResponse } from 
 interface FormationState {
   leader: string | null;
   merchantCharacter: string | null;
+  merchantEventCombatEnabled: boolean;
   followers: Record<string, boolean>;
   eventsByCharacter: Record<string, boolean>;
   eventSelectionsByCharacter: Record<string, string[]>;
@@ -41,6 +42,11 @@ export function createFormationRoute(state: FormationState, ports: FormationPort
   function character(body: Record<string, unknown>): FormationError | null {
     const name = requestText(body.character);
     if (!ports.owned(name)) return { code: 400, error: "invalid character" };
+    if (body.merchantEventCombatEnabled !== undefined) {
+      if (name !== state.merchantCharacter || typeof body.merchantEventCombatEnabled !== "boolean")
+        return { code: 400, error: "select the configured merchant and a boolean event combat setting" };
+      state.merchantEventCombatEnabled = body.merchantEventCombatEnabled;
+    }
     if (body.follow !== undefined) {
       if (typeof body.follow !== "boolean") return { code: 400, error: "invalid follower" };
       state.followers[name] = body.follow;
@@ -69,6 +75,7 @@ export function createFormationRoute(state: FormationState, ports: FormationPort
       followers: state.followers,
       eventsByCharacter: state.eventsByCharacter,
       eventSelectionsByCharacter: state.eventSelectionsByCharacter,
+      merchantEventCombatEnabled: state.merchantEventCombatEnabled,
     });
   };
 }

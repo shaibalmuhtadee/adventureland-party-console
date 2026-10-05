@@ -113,6 +113,7 @@ export type PartyState = {
   followers?: Record<string, boolean>;
   eventsByCharacter?: Record<string, boolean>;
   eventSelectionsByCharacter?: Record<string, string[]>;
+  merchantEventCombatEnabled?: boolean;
   eventSchedules?: import("./event-selection-control").EventSchedule[];
   monsterFocus?: string[] | string;
   monsterFocusByCharacter?: Record<string, string[]>;

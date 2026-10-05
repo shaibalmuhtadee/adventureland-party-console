@@ -53,6 +53,7 @@ export const validators: Record<string, (value: unknown) => boolean> = {
   monsterSearchRadiusByCharacter: mapOf(positive),
   bankboiPrefix: v => text(v) && (v === "" || /^[A-Za-z0-9_]{3,11}$/.test(v as string)),
   anniversaryAutoChat: boolean,
+  merchantEventCombatEnabled: boolean,
   merchantStandLocation: validStandLocation,
   threshold: number,
   itemCollectionThreshold: positive,
