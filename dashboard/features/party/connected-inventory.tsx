@@ -39,6 +39,7 @@ export const ConnectedInventory = memo(function ConnectedInventory({
     setGearComparison,
     sendCharacter,
     post,
+    saveRestock,
   } = model;
   const char = state.characters[name];
   useEffect(() => {
@@ -221,6 +222,8 @@ export const ConnectedInventory = memo(function ConnectedInventory({
       onCompare={onCompare}
       onCommand={command}
       onTravel={onTravel}
+      restockValue={state.restockPolicies?.[name]}
+      onSaveRestock={saveRestock}
     />
     <LuckySlotDialog character={name} tracking={luckyTracking} verified={state.luckyUpgradeSlots?.[name]} open={luckySlotOpen} onOpenChange={setLuckySlotOpen} />
     {char.name === state.merchantCharacter && <SharedRuleConflicts state={state} onResolve={(id, owner) => post("/merchant/rule-conflict", {id,owner})} />}

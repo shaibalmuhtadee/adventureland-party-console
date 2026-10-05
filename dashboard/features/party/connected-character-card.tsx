@@ -15,7 +15,6 @@ import { GoldTargetControl } from './gold-target-control';
 import { MerchantCardControls } from './merchant-card-controls';
 import { Meter } from './meter';
 import { MonsterFocusPicker } from './monster-focus-picker';
-import { RestockControls } from './restock-controls';
 import { CharacterStatsTrigger } from './character-stats-trigger';
 import type { CharacterCardModel, InventoryModel } from './character-card-model';
 import { XpMeter } from './xp-meter';
@@ -78,7 +77,6 @@ export const ConnectedCharacterCard = memo(function ConnectedCharacterCard({
     findMonsterFor,
     selectedFocus,
     setFocus,
-    saveRestock,
     setAnniversaryOpen,
     setSelectedBestiaryMonster,
     setActionError,
@@ -450,11 +448,6 @@ export const ConnectedCharacterCard = memo(function ConnectedCharacterCard({
           </div>
         </div>
       )}
-      <RestockControls
-        character={char.name}
-        value={state.restockPolicies?.[char.name]}
-        onSave={saveRestock}
-      />
       <ConnectedInventory name={char.name} model={inventoryModel} />
     </article>
   );

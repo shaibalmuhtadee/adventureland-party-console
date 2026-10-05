@@ -56,6 +56,8 @@ import { LuckySlotMenu, type LuckySlotMenuSelection } from "./lucky-slot-menu";
 import { luckySlotSearch, type LuckySlotTracking } from "../../../runtime/lucky-slot-tracking";
 import { CompoundGroup } from "./compound-group";
 import { Equipment } from "./equipment";
+import { RestockControls } from "./restock-controls";
+import type { RestockPolicy } from "./restock-policy";
 import { InventoryEntry } from "./inventory-entry";
 import { Item } from "./item";
 import type { NpcSaleMark } from "./npc-sale-mark";
@@ -125,6 +127,8 @@ export const InventoryPanel = memo(function InventoryPanel({
   onCompare,
   onCommand,
   onTravel,
+  restockValue,
+  onSaveRestock,
   onNpcSale,
   onAutoNpcSale,
   onAutoStand,
@@ -205,6 +209,8 @@ export const InventoryPanel = memo(function InventoryPanel({
     extra?: Record<string, unknown>,
   ) => Promise<void>;
   onTravel: () => void;
+  restockValue?: RestockPolicy;
+  onSaveRestock?: (character: string, value: RestockPolicy) => Promise<void>;
   onStand: (entry: InventoryEntry) => void;
   onNpcSale: (entry: InventoryEntry) => void;
   onAutoNpcSale: (entry: InventoryEntry) => void;
@@ -217,6 +223,7 @@ export const InventoryPanel = memo(function InventoryPanel({
     leader !== character.name &&
     characters.some((member) => member.name === leader && member.seenAt > 0);
   const [inventoryOpen, setInventoryOpen] = useState(true);
+  const [equipmentOpen, setEquipmentOpen] = useState(true);
   const [luckySlotMenu, setLuckySlotMenu] = useState<LuckySlotMenuSelection | null>(null);
   const nextUpgradeSlot = validLuckySlot(luckyUpgradeSlot) ? luckyUpgradeSlot :
     luckySlotSearch(luckySlotTracking || {version: 1, slots: {}}).nextSlot;
@@ -549,26 +556,11 @@ export const InventoryPanel = memo(function InventoryPanel({
   };
   return (
     <div className="p-5">
-      <Equipment
-        character={character}
-        upgradeMarks={upgradeMarks}
-        autoUpgradeMarks={autoUpgradeMarks}
-        statScrollMarks={statScrollMarks}
-        statScrollInventory={statScrollInventory}
-        onSelect={onSelect}
-        onUnequip={onUnequip}
-        onUpgrade={onEquipmentUpgrade}
-        onAutoUpgrade={onEquipmentAutoUpgrade}
-        onStatScroll={onEquipmentStatScroll}
-        hasAutomaticMarks={hasAutomaticMarks}
-        onClearMarks={onEquipmentClearMarks}
-        onBuy={onEquipmentBuy}
-      />
       <button
         type="button"
         aria-expanded={inventoryOpen}
         onClick={() => setInventoryOpen((open) => !open)}
-        className="mb-3 mt-5 flex w-full items-center justify-between border-t border-emerald-900 pt-5 text-left"
+        className="mb-3 flex w-full items-center justify-between text-left"
       >
         <span className="flex items-center gap-2 font-mono text-xs uppercase text-emerald-100/55">
           {inventoryOpen ? (
@@ -1079,6 +1071,45 @@ export const InventoryPanel = memo(function InventoryPanel({
             })}
           </div>
         </>
+      ) : null}
+      <button
+        type="button"
+        aria-expanded={equipmentOpen}
+        onClick={() => setEquipmentOpen((open) => !open)}
+        className="mb-3 mt-5 flex w-full items-center justify-between border-t border-emerald-900 pt-5 text-left"
+      >
+        <span className="flex items-center gap-2 font-mono text-xs uppercase text-emerald-100/55">
+          {equipmentOpen ? (
+            <ChevronDown className="h-4 w-4" />
+          ) : (
+            <ChevronRight className="h-4 w-4" />
+          )}
+          Equipped
+        </span>
+      </button>
+      {equipmentOpen ? (
+        <Equipment
+          character={character}
+          upgradeMarks={upgradeMarks}
+          autoUpgradeMarks={autoUpgradeMarks}
+          statScrollMarks={statScrollMarks}
+          statScrollInventory={statScrollInventory}
+          onSelect={onSelect}
+          onUnequip={onUnequip}
+          onUpgrade={onEquipmentUpgrade}
+          onAutoUpgrade={onEquipmentAutoUpgrade}
+          onStatScroll={onEquipmentStatScroll}
+          hasAutomaticMarks={hasAutomaticMarks}
+          onClearMarks={onEquipmentClearMarks}
+          onBuy={onEquipmentBuy}
+        />
+      ) : null}
+      {onSaveRestock ? (
+        <RestockControls
+          character={character.name}
+          value={restockValue}
+          onSave={onSaveRestock}
+        />
       ) : null}
       {character.name !== merchant && (
         <div className="mt-5 grid gap-2 border-t border-emerald-900 pt-4">

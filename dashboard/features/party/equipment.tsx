@@ -57,7 +57,6 @@ export const Equipment = memo(function Equipment({
   );
   return (
     <section>
-      <h3 className="mb-3 font-mono text-xs uppercase text-emerald-100/55">Equipped</h3>
       <div className="grid grid-cols-2 items-start gap-3">
         <div className="grid gap-2">
           {slots

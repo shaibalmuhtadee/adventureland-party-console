@@ -5,11 +5,11 @@ import { useForwardingActions } from './use-forwarding-actions';
 
 const inventoryActions = ['command', 'post', 'setActionError', 'setStandItem', 'setNpcSaleItem',
   'setAutoNpcSaleItem', 'clearAutomaticSales', 'removeAutomaticSale', 'setSelected',
-  'setGearComparison', 'sendCharacter'] as const;
+  'setGearComparison', 'sendCharacter', 'saveRestock'] as const;
 const cardActions = ['formation', 'logout', 'post', 'setFarmingPolicy', 'setSelectedCondition',
   'command', 'bankParty', 'clearMerchantWork', 'setForceStand', 'cancelMerchantJob',
   'setRoutinesOpen', 'gather', 'refresh', 'setCommerceMode', 'setDonationOpen', 'setGiveawayRealm',
-  'setGiveawayMerchant', 'setGiveawayOpen', 'findMonsterFor', 'setFocus', 'saveRestock',
+  'setGiveawayMerchant', 'setGiveawayOpen', 'findMonsterFor', 'setFocus',
   'moveSteamToHeadless', 'joinOrPromoteSteam', 'setAnniversaryOpen', 'setMonsterNavigateTarget',
   'setSelected', 'setSelectedBestiaryMonster', 'setActionError', 'clearCollectionErrors',
   'editThreshold', 'save', 'editItemCollectionThreshold', 'saveItemCollectionThreshold'] as const;
