@@ -12569,13 +12569,13 @@
     var hpRatio = character.max_hp > 0 ? character.hp / character.max_hp : 1;
     var mpRatio = character.max_mp > 0 ? character.mp / character.max_mp : 1;
     var skill = null;
+    // Potions take priority over free regeneration below 50% MP for every class.
+    regenerationBusy = true;
+    try {
+      if (await useRecoveryPotion({ hpBelow: character.ctype === "merchant" ? 0.2 : undefined, mpBelow: 0.5, priority: "hp" })) return true;
+    } finally { regenerationBusy = false; }
     if (character.ctype === "merchant") {
       // The independent pulse runs while production owns the role loop.
-      // Critical pools use potions first, then fall through to free recovery.
-      regenerationBusy = true;
-      try {
-        if (await useRecoveryPotion({hpBelow:0.2,mpBelow:0.2,priority:"hp"})) return true;
-      } finally { regenerationBusy = false; }
       // use_hp consumes the last inventory item that grants HP. Match that
       // selection so the threshold reflects the potion actually consumed.
       var healAmount = 0;

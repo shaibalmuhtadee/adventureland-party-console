@@ -6,6 +6,6 @@ export const role: Partial<Role> = {
     return await sharedRoutine.energizeLowestMana(0.35);
   },
   usePotion: async function () {
-    return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.2, priority: "hp" });
+    return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" });
   },
 };

@@ -18,7 +18,7 @@ export const role: Partial<Role> = {
     return await sharedRoutine.skillSupport?.() ?? false;
   },
   usePotion: async function () {
-    return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.2, priority: "hp" });
+    return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" });
   },
   beforeAttack: async function (target) {
     if (sharedRoutine.getFarmingMode() === "scatter") return false;
