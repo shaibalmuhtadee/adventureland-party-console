@@ -443,10 +443,9 @@ function PartyManagementPanelsConnected({ base }: { base: PartyConsoleModel }) {
           <DialogHeader>
             <DialogTitle>Automatically sell to NPC?</DialogTitle>
             <DialogDescription>
-              {autoNpcSaleItem?.character
-                ? `Matching items on ${autoNpcSaleItem.character} will be collected and sold by the merchant. This`
-                : 'Every future matching item received by the merchant will be queued for NPC sale. This'}
-              remains active until you clear the rule.
+              All items with this name, including upgraded and stat variants, will be
+              collected from the party and sold by the merchant. This remains active
+              until you clear the rule.
             </DialogDescription>
           </DialogHeader>
           <div className="min-h-0 flex-1 space-y-4 overflow-y-auto">

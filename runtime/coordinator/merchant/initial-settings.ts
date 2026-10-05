@@ -105,8 +105,10 @@ export function initialMerchantSales(settings: SavedMerchantSettings, now: () =>
     deconstructionMarks: settings.deconstructionMarks || [],
     autoDeconstruction: settings.autoDeconstruction || {},
     deconstructionCatalog: {} as DeconstructionCatalog,
-    npcSaleMarks: Array.isArray(settings.npcSaleMarks) ? settings.npcSaleMarks : [],
-    autoNpcSales: settings.autoNpcSales || {},
+    npcSaleMarks: Array.isArray(settings.npcSaleMarks) ? settings.npcSaleMarks.map(mark =>
+      mark.auto ? { ...mark, autoRuleKey: String(mark.item.name) } : mark) : [],
+    autoNpcSales: Object.fromEntries(Object.values(settings.autoNpcSales || {}).map(rule =>
+      [String(rule.item.name), { item: { name: rule.item.name }, createdAt: rule.createdAt }])),
     autoStandMarks: settings.autoStandMarks || {},
     merchantRoutinePriorities: {
       ...defaultMerchantRoutinePriorities(),

@@ -128,8 +128,7 @@ function clearMerchantRules(state: State, selected: Selection): void {
 function clearRules(state: State, selected: Selection): Set<string> {
   const { name, item } = selected, key = automaticCommerceRuleKey(item), removed = new Set<string>();
   for (const [ruleKey, rule] of Object.entries(state.autoNpcSales || {})) {
-    const owner = rule.character || state.merchantCharacter;
-    if (owner === ruleOwner(state, name) && automaticCommerceRuleKey(rule.item) === key) {
+    if (rule.item.name === item.name) {
       delete state.autoNpcSales![ruleKey];
       removed.add(ruleKey);
     }

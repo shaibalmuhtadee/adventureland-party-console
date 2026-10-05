@@ -2,7 +2,7 @@ import { itemRuleConflicts } from "../inventory/shared-rules.ts";
 import type { DeconstructionMark } from "./deconstruction.ts";
 import type { Item, InventoryEntry } from "../contracts/item.ts";
 import { availableCraftStock, craftProtection, type CraftReservationState } from "./craft-reservations.ts";
-import { automaticCommerceRuleKey, sameMarkedItem } from "../inventory/item-identity.ts";
+import { automaticCommerceRuleKey, automaticNpcSaleRuleKey, sameMarkedItem } from "../inventory/item-identity.ts";
 import { reconcileNpcSales, type NpcSale } from "./npc-sales.ts";
 import type { StandMark } from "./stand-marks.ts";
 import { reconcilePlayerSales, type PlayerSaleState } from "./player-npc-sales.ts";
@@ -120,7 +120,7 @@ export function createAutomaticMerchantSales(state: SalesState, ports: SalesPort
   }
   function bankStandEntry(entry: (InventoryEntry & { craftLocation: string }) | null): entry is InventoryEntry & SaleEntry & { craftLocation: string } {
     if (!entry?.item || entry.item.l || !Number.isSafeInteger(entry.slot)) return false;
-    return !state.autoNpcSales[automaticCommerceRuleKey(entry.item)] && !saleConflict(entry.item);
+    return !state.autoNpcSales[automaticNpcSaleRuleKey(entry.item)] && !saleConflict(entry.item);
   }
 
   function deconstructionReserved(item: Item) {
@@ -161,8 +161,8 @@ export function createAutomaticMerchantSales(state: SalesState, ports: SalesPort
       if (!entry?.item || !Number.isSafeInteger(entry.slot) || entry.item.l) continue;
       if (saleConflict(entry.item)) continue;
       const key = automaticCommerceRuleKey(entry.item);
-      if (state.autoNpcSales[key]) {
-        if (markAutomaticNpc(entry, key)) changed = true;
+      if (state.autoNpcSales[automaticNpcSaleRuleKey(entry.item)]) {
+        if (markAutomaticNpc(entry, automaticNpcSaleRuleKey(entry.item))) changed = true;
       } else if (markStandSale(entry, key)) standChanged = changed = true;
     }
     return { changed, standChanged };

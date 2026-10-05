@@ -32,7 +32,7 @@ export function ExchangeRewardTile({ reward, model }: { reward: ExchangeRewardTi
   const upgradeTiers = upgradeRuleTiers(state.autoUpgradeMarks?.[String(merchant)]?.[key]);
   const upgradePending = !!upgradeTiers && upgradeRuleQuantity(state.autoUpgradeMarks?.[String(merchant)]?.[key]) !== 0;
   const compound = state.autoCompounds?.[String(merchant)]?.find(rule => rule.name === item.name);
-  const npc = !!state.autoNpcSales?.[commerce], stand = !!state.autoStandMarks?.[commerce];
+  const npc = !!state.autoNpcSales?.[String(item.name)], stand = !!state.autoStandMarks?.[commerce];
   const exchange = !!state.autoExchanges?.[`${item.name}@${item.level}`];
   const bulkUnsupported = reward.markMode?.action === 'upgrade' && (!entry.meta?.upgradeable ||
     Number(reward.markMode.targetLevel) <= item.level || Number(reward.markMode.targetLevel) > itemMaximumLevel(entry.meta));

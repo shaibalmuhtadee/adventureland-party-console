@@ -44,17 +44,17 @@ export function createAutomaticSaleRoutes(state: AutomaticSaleState, ports: Auto
       return false;
     });
   }
-  function updateNpc(item: Item, action: string, character?: string): void {
-    const key = character ? npcSaleRuleKey(item, character) : ports.key(item);
+  function updateNpc(item: Item, action: string): void {
+    const key = npcSaleRuleKey(item);
     if (action === "remove") {
       delete state.autoNpcSales[key];
       discardNpc(mark => mark.autoRuleKey === key);
     } else {
-      ports.selectAction?.(item, character || String(state.merchantCharacter), 'npc');
-      state.autoNpcSales[key] = { item, createdAt: ports.now(), ...(character ? { character } : {}) };
-      if (character || state.merchantRules) return;
-      delete state.autoStandMarks[key];
-      discardStand(listing => !!listing.auto && listing.autoRuleKey === key);
+      ports.selectAction?.(item, String(state.merchantCharacter), 'npc');
+      state.autoNpcSales[key] = { item: { name: item.name }, createdAt: ports.now() };
+      if (state.merchantRules) return;
+      delete state.autoStandMarks[ports.key(item)];
+      discardStand(listing => !!listing.auto && listing.autoRuleKey === ports.key(item));
     }
   }
   function save(syncStand = false): void {
@@ -67,18 +67,16 @@ export function createAutomaticSaleRoutes(state: AutomaticSaleState, ports: Auto
     const body = requestObject(req.body),
       item = requestObject(body.item),
       action = requestText(body.action || "set");
-    const character = state.merchantRules ? undefined : typeof body.character === "string" ? body.character : undefined;
-    if (character && !state.statuses?.[character]) return res.status(400).json({ error: "Unknown character" });
     if (action === "clear-all") {
-      const keys = new Set(Object.keys(state.autoNpcSales).filter(key => state.autoNpcSales[key].character === character));
+      const keys = new Set(Object.keys(state.autoNpcSales));
       for (const key of keys) delete state.autoNpcSales[key];
       discardNpc(mark => !!mark.auto && keys.has(mark.autoRuleKey!));
     } else {
       if (typeof item.name !== "string")
         return res.status(400).json({ error: "invalid automatic NPC sale item" });
-      updateNpc(item, action, character);
+      updateNpc(item, action);
     }
-    save(!character);
+    save(true);
     return res.json({ ok: true, autoNpcSales: state.autoNpcSales });
   }
   function updateStand(item: Item, action: string, price: number): string | null {
@@ -91,8 +89,8 @@ export function createAutomaticSaleRoutes(state: AutomaticSaleState, ports: Auto
       ports.selectAction?.(item, String(state.merchantCharacter), 'stand');
       state.autoStandMarks[key] = { item, price, createdAt: ports.now() };
       if (state.merchantRules) return null;
-      delete state.autoNpcSales[key];
-      state.npcSaleMarks = state.npcSaleMarks.filter((mark) => mark.autoRuleKey !== key);
+      delete state.autoNpcSales[npcSaleRuleKey(item)];
+      discardNpc(mark => !!mark.auto && mark.autoRuleKey === npcSaleRuleKey(item));
     }
     return null;
   }

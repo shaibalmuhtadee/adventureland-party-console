@@ -42,3 +42,6 @@ export function automaticCommerceRuleKey(item: Item | null | undefined): string 
     stat_type: item?.stat_type || null,
   });
 }
+
+/** NPC sale policies apply to every variant of the game item ID. */
+export function automaticNpcSaleRuleKey(item: Item): string { return String(item.name); }

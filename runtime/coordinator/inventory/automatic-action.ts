@@ -1,5 +1,5 @@
 import type { Item, ItemMark } from '../contracts/item.ts';
-import { autoItemRuleKey, automaticCommerceRuleKey } from './item-identity.ts';
+import { autoItemRuleKey, automaticCommerceRuleKey, automaticNpcSaleRuleKey } from './item-identity.ts';
 import { ruleOwner, type SharedScope } from './shared-rules.ts';
 
 export type AutomaticAction = 'bank' | 'merchant' | 'upgrade' | 'compound' | 'npc' | 'stand' | 'exchange' | 'deconstruction';
@@ -63,9 +63,9 @@ function rememberRemoved(selected: Selection, mark: { id?: string }): void {
   if (mark.id) selected.removed.add(mark.id);
 }
 function clearNpc(selected: Selection): void {
-  const { state, owner, commerce } = selected;
+  const { state, item } = selected;
   for (const [id, rule] of Object.entries(state.autoNpcSales || {})) {
-    if ((rule.character || state.merchantCharacter) !== owner || automaticCommerceRuleKey(rule.item) !== commerce) continue;
+    if (rule.item.name !== item.name) continue;
     drop(selected, state.autoNpcSales, id);
     selected.removed.add(id);
   }
@@ -143,7 +143,7 @@ export function exchangeRewardAction(state: AutomaticActionState, item: Item): A
   const owner = String(state.merchantCharacter), commerce = automaticCommerceRuleKey(item);
   const choices: [AutomaticAction, boolean][] = [
     ['exchange', !!state.autoExchanges?.[`${item.name}@${Number(item.level) || 0}`]],
-    ['npc', !!state.autoNpcSales?.[commerce]],
+    ['npc', !!state.autoNpcSales?.[automaticNpcSaleRuleKey(item)]],
     ['stand', !!state.autoStandMarks?.[commerce]],
     ['upgrade', upgradePending(state, owner, item)],
     ['compound', compoundPending(state, owner, item)],

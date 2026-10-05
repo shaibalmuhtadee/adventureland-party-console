@@ -1,4 +1,4 @@
-import { automaticCommerceRuleKey, sameMarkedItem } from './item-identity.ts';
+import { automaticCommerceRuleKey, automaticNpcSaleRuleKey, sameMarkedItem } from './item-identity.ts';
 import type { Item } from '../contracts/item.ts';
 import { requestObject, type HttpRouter } from '../http/contracts.ts';
 
@@ -52,7 +52,7 @@ function npcRecords(state: RuleData, owner: string) {
   const records: Record<string, Record<string, unknown>> = {};
   for (const rule of Object.values(state.autoNpcSales)) {
     const { character, ...value } = rule;
-    (records[character || owner] ||= {})[automaticCommerceRuleKey(rule.item)] = value;
+    (records[character || owner] ||= {})[automaticNpcSaleRuleKey(rule.item)] = value;
   }
   return records;
 }
@@ -113,7 +113,7 @@ export function itemRuleConflicts(state: ConflictState, item: Item): string[] {
   const owner = String(state.merchantCharacter), key = automaticCommerceRuleKey(item);
   const actions: string[] = [];
   if (processingPending(state,item)) actions.push('Processing');
-  if (state.autoNpcSales?.[key]) actions.push('NPC sale');
+  if (state.autoNpcSales?.[automaticNpcSaleRuleKey(item)]) actions.push('NPC sale');
   if (state.autoStandMarks?.[key]) actions.push('Stand sale');
   if (deconstructionRule(state,owner,key)) actions.push('Deconstruction');
   return actions.length > 1 ? actions : [];
@@ -138,7 +138,7 @@ function ruleSignature(value: unknown): string {
 
 function rekeyNpcReservations(state: RuleData, rules: SharedRules) {
   for (const mark of state.npcSaleMarks || [])
-    if (mark.auto && (!mark.character || rules.members.includes(mark.character))) mark.autoRuleKey = automaticCommerceRuleKey(mark.item);
+    if (mark.auto && (!mark.character || rules.members.includes(mark.character))) mark.autoRuleKey = automaticNpcSaleRuleKey(mark.item);
 }
 
 function migrationEntries(family: RuleFamily, entries: Record<string,unknown>): [string,unknown][] {

@@ -215,7 +215,7 @@ export const InventoryPanel = memo(function InventoryPanel({
   const nextUpgradeSlot = validLuckySlot(luckyUpgradeSlot) ? luckyUpgradeSlot :
     luckySlotSearch(luckySlotTracking || {version: 1, slots: {}}).nextSlot;
   const luckySlotLabel = validLuckySlot(luckyUpgradeSlot) ? "Verified lucky upgrade slot" : "Next upgrade will test for lucky upgrade";
-  type AutomaticSection = "npc" | "stand" | "upgrade" | "compound" | "merchant" | "bank" | "deconstruction";
+  type AutomaticSection = "npc" | "npc-manual" | "stand" | "upgrade" | "compound" | "merchant" | "bank" | "deconstruction";
   const [openAutomaticSections, setOpenAutomaticSections] = useState<
     Partial<Record<AutomaticSection, boolean>>
   >({});
@@ -298,7 +298,7 @@ export const InventoryPanel = memo(function InventoryPanel({
             <span>{title}</span>
             <span className="ml-auto font-mono opacity-70">{entries.length}</span>
           </button>
-          <button
+          {section !== "npc-manual" && <button
             type="button"
             disabled={!entries.length}
             aria-label={clearArmed ? `Really clear all ${title}` : `Clear all ${title}`}
@@ -318,7 +318,7 @@ export const InventoryPanel = memo(function InventoryPanel({
               Really?
             </span>
             <X className="h-4 w-4 shrink-0" />
-          </button>
+          </button>}
         </div>
         <div
           className={`grid transition-[grid-template-rows,opacity] duration-300 ease-in-out ${open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
@@ -513,7 +513,7 @@ export const InventoryPanel = memo(function InventoryPanel({
       const key = `${item.name}@+${item.level || 0}`, commerceKey = automaticCommerceRuleKey(item);
       return Boolean(autoItemMarks[key] || (!item.level && autoItemMarks[item.name]) || autoUpgradeMarks[key] ||
         autoCompoundMarks.some(rule => rule.name === item.name) || autoDeconstruction[commerceKey] ||
-        autoNpcSales[sharedRules || character.name === merchant ? commerceKey : JSON.stringify([character.name, commerceKey])] ||
+        autoNpcSales[String(item.name)] ||
         (character.name === merchant && (autoStandMarks[commerceKey] || autoExchanges[`${item.name}@${item.level || 0}`] || (merchantWeapon?.item && same(item, merchantWeapon.item)))));
     },
     [autoItemMarks, autoUpgradeMarks, autoCompoundMarks, autoDeconstruction, autoNpcSales, sharedRules, character.name, merchant, autoStandMarks, autoExchanges, merchantWeapon],
@@ -671,7 +671,7 @@ export const InventoryPanel = memo(function InventoryPanel({
                 character.name === merchant && !!autoExchanges[autoExchangeKey];
               const automaticSaleKey = automaticCommerceRuleKey(entry.item);
               const autoNpcSaleMarked =
-                !!autoNpcSales[sharedRules || character.name === merchant ? automaticSaleKey : JSON.stringify([character.name, automaticSaleKey])];
+                !!autoNpcSales[String(entry.item.name)];
               const npcSale = npcSaleMarks.find(mark =>
                 (character.name === merchant ? mark.source === "merchant" : mark.source === "character" && mark.character === character.name) && mark.slot === entry.slot &&
                 automaticCommerceRuleKey(mark.item) === automaticSaleKey);
@@ -1091,14 +1091,21 @@ export const InventoryPanel = memo(function InventoryPanel({
               "Auto NPC sales",
               <DollarSign className="h-4 w-4" />,
               "border-rose-800 text-rose-300",
-              [...Object.entries(autoNpcSales).filter(([, rule]) => character.name === merchant ? !rule.character : rule.character === character.name).map(([key, rule]) => ({
+              Object.entries(autoNpcSales).map(([key, rule]) => ({
                 key,
                 item: rule.item,
                 onRemove: () => onRemoveAutomaticSale("npc", rule.item),
-              })), ...npcSaleMarks.map(mark => ({
+              })),
+            )}
+        {npcSaleMarks.some(mark => !mark.auto) && automaticSection(
+              "npc-manual",
+              "Manual NPC sales",
+              <DollarSign className="h-4 w-4" />,
+              "border-rose-800 text-rose-300",
+              npcSaleMarks.filter(mark => !mark.auto).map(mark => ({
                 key: mark.id, item: mark.item, detail: `${mark.character || merchant} · ${mark.quantity} × · ${mark.state || 'queued'}${mark.error ? ` · ${mark.error}` : ''}`,
                 disabled: mark.state === 'running', onRemove: () => onRemoveNpcSale?.(mark.id),
-              }))],
+              })),
             )}
         {automaticSection(
           "deconstruction", "Auto deconstruction", <BrokenStickIcon className="h-4 w-4" />,

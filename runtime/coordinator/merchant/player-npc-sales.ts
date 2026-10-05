@@ -1,6 +1,6 @@
 import { itemRuleConflicts, sharedMember, type ConflictState } from "../inventory/shared-rules.ts";
 import type { Item, ItemMark } from "../contracts/item.ts";
-import { automaticCommerceRuleKey, sameMarkedItem } from "../inventory/item-identity.ts";
+import { automaticNpcSaleRuleKey, sameMarkedItem } from "../inventory/item-identity.ts";
 import type { NpcSale } from "./npc-sales.ts";
 
 export interface NpcSaleRule {
@@ -8,10 +8,7 @@ export interface NpcSaleRule {
   createdAt: number;
   character?: string;
 }
-export const npcSaleRuleKey = (item: Item, character?: string) =>
-  character
-    ? JSON.stringify([character, automaticCommerceRuleKey(item)])
-    : automaticCommerceRuleKey(item);
+export const npcSaleRuleKey = automaticNpcSaleRuleKey;
 export interface PlayerSaleState extends ConflictState {
   merchantAutomations?: Record<string, boolean | undefined>;
   merchantCharacter: string | null;
@@ -107,7 +104,7 @@ function automatic(state: PlayerSaleState, status: PlayerStatus, ports: PlayerPo
   for (const entry of status.items) {
     if (!entry?.item || protectedEntry(state,name,entry))
       continue;
-    const key = npcSaleRuleKey(entry.item, state.merchantRules ? undefined : name);
+    const key = npcSaleRuleKey(entry.item);
     if (!automaticRule(state,key,entry.item)) continue;
     if (!existingIntent(state, status, entry, ports.now()))
       state.npcSaleMarks.push({
