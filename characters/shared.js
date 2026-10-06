@@ -15375,9 +15375,9 @@
     var priestSpacing = 25;
     var warriorPhaseBefore = formationState.warriorPhase;
     if (warrior) {
-      if (!is_in_range(reference))
-        formationState.warriorPhase = "approaching";
-      if (is_in_range(reference)) formationState.warriorPhase = "melee-kiting";
+      var closeEnough = is_in_range(reference) &&
+        (character.ctype !== "warrior" || combatDistance(reference) <= desired + 3);
+      formationState.warriorPhase = closeEnough ? "melee-kiting" : "approaching";
     }
     var closing = warrior && formationState.warriorPhase === "approaching";
     var secondary = selfPriest || mage ? formationFrame.enemies.filter(function (enemy) {
@@ -15631,6 +15631,8 @@
 
   function desiredCombatRange() {
     var range = Math.max(1, Number(character.range) || 25);
+    // Stay deep inside melee range so a moving target cannot immediately leave it.
+    if (character.ctype === "warrior" && range < 100) return Math.max(1, Math.min(4, range * 0.125));
     return Math.max(1, range - Math.min(12, Math.max(2, range * 0.05)));
   }
   function combatDistance(target) {
