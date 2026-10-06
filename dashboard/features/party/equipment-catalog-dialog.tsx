@@ -22,7 +22,7 @@ import { ItemSprite } from "./item-sprite";
 import { MerchantCatalogItem } from "./merchant-catalog-item";
 import type { InventoryEntry } from "./inventory-entry";
 
-// The full equipment catalog can run into the hundreds of items; mounting every
+// The full item catalog can run into the hundreds of items; mounting every
 // row at once (each with a sprite, several labels and an optional compare
 // button) has been observed to freeze the tab for multiple seconds on open.
 // Render a bounded initial window and append more as the user scrolls.
@@ -57,40 +57,41 @@ export const EquipmentCatalogDialog = memo(function EquipmentCatalogDialog({
   const [previousComparisonSource, setPreviousComparisonSource] = useState(comparisonSource);
   if (previousComparisonSource !== comparisonSource) {
     setPreviousComparisonSource(comparisonSource);
-    if (comparisonSource) {
-      const type = String(comparisonSource.meta?.definition.type || "");
-      setTypes(type ? [type] : []);
-      setSearch("");
-      setSelectedClasses([]);
-      setExclusiveGear(false);
-    }
+    const type = String(comparisonSource?.meta?.definition.type || "");
+    setTypes(type ? [type] : []);
+    setSearch("");
+    setSelectedClasses([]);
+    setExclusiveGear(false);
   }
   const [sort, setSort] = useState("tier");
-  const equipment = useMemo(
+  const equipmentOnly = Boolean(comparison || comparisonSource);
+  const catalogItems = useMemo(
     () =>
-      catalog.filter((item) => EQUIPMENT_TYPES.includes(String(item.meta?.definition.type || ""))),
-    [catalog],
+      equipmentOnly
+        ? catalog.filter((item) => EQUIPMENT_TYPES.includes(String(item.meta?.definition.type || "")))
+        : catalog,
+    [catalog, equipmentOnly],
   );
   const availableTypes = useMemo(
-    () => [...new Set(equipment.map((item) => String(item.meta?.definition.type || "")))].sort(),
-    [equipment],
+    () => [...new Set(catalogItems.map((item) => String(item.meta?.definition.type || "")))].sort(),
+    [catalogItems],
   );
   const availableClasses = useMemo(
     () =>
       [
         ...new Map(
-          equipment.flatMap((item) =>
+          catalogItems.flatMap((item) =>
             (item.meta?.usage?.classes || []).map((entry) => [entry.id, entry.name] as const),
           ),
         ).entries(),
       ].sort((a, b) => a[1].localeCompare(b[1])),
-    [equipment],
+    [catalogItems],
   );
   const rows = useMemo(() => {
     const query = search.trim().toLowerCase();
     const value = (item: MerchantCatalogItem, key: string) =>
       Number(item.meta?.properties?.[key] ?? item.meta?.definition[key] ?? 0);
-    return equipment
+    return catalogItems
       .filter(
         (item) =>
           (!query ||
@@ -120,7 +121,7 @@ export const EquipmentCatalogDialog = memo(function EquipmentCatalogDialog({
           return value(b, "tier") - value(a, "tier") || a.name.localeCompare(b.name);
         return value(b, sort) - value(a, sort) || a.name.localeCompare(b.name);
       });
-  }, [equipment, search, sort, types, selectedClasses, exclusiveGear]);
+  }, [catalogItems, search, sort, types, selectedClasses, exclusiveGear]);
   const [visibleCount, setVisibleCount] = useState(ROW_BATCH);
   const [previousRows, setPreviousRows] = useState(rows);
   const [previousOpen, setPreviousOpen] = useState(open);
@@ -161,10 +162,10 @@ export const EquipmentCatalogDialog = memo(function EquipmentCatalogDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[92vh] w-[96vw] max-w-[1500px] flex-col border-cyan-800 bg-[#07120f] text-emerald-50 sm:max-w-[96vw] 2xl:max-w-[1500px]">
         <DialogHeader>
-          <DialogTitle>Equipment catalog</DialogTitle>
+          <DialogTitle>{equipmentOnly ? "Equipment catalog" : "Item catalog"}</DialogTitle>
           <DialogDescription>
-            Every equippable item in the current game data. Click an item for its full details and
-            WTB action.
+            {equipmentOnly ? "Every equippable item" : "Every item, including equipment, ingredients, and consumables"}
+            {" "}in the current game data. Click an item for details, WTB, or Add to Ponty.
           </DialogDescription>
         </DialogHeader>
         {comparison?.controls}
@@ -172,7 +173,7 @@ export const EquipmentCatalogDialog = memo(function EquipmentCatalogDialog({
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search equipment, ID, or set…"
+            placeholder="Search items, ID, or set…"
             className="border-cyan-800 bg-black"
           />
           <Select value={sort} onValueChange={(value) => value && setSort(value)}>
@@ -305,7 +306,8 @@ export const EquipmentCatalogDialog = memo(function EquipmentCatalogDialog({
                   </div>
                   <p className="mt-1 truncate text-xs font-semibold">{item.name}</p>
                   <p className="font-mono text-[9px] uppercase text-cyan-100/45">
-                    {String(def.type || "")} · T{Number(def.tier) || 0}
+                    {String(def.type || "item")}
+                    {EQUIPMENT_TYPES.includes(String(def.type || "")) ? ` · T${Number(def.tier) || 0}` : ""}
                   </p>
                   {def.set ? (
                     <p className="truncate font-mono text-[9px] text-violet-300">

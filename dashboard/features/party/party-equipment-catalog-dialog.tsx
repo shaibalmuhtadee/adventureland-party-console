@@ -40,7 +40,7 @@ function PartyEquipmentCatalogDialogConnected({ base }: { base: PartyConsoleMode
   const onInspect = useCallback(
     (item: { id: string; meta?: import("./item-meta").ItemMeta | null }) =>
       setSelected({
-        character: "Equipment catalog",
+        character: "Item catalog",
         catalog: true,
         entry: { slot: -1, item: { name: item.id }, meta: item.meta },
       }),

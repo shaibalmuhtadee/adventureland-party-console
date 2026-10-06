@@ -1,6 +1,9 @@
 # Ponty Shop
 
-Add items through **Catalog > item > Add to Ponty**. The merchant's collapsible
+Add items through **Catalog > item > Add to Ponty**. The catalog includes all
+items, including ingredients such as `ashleaf`, `gslime`, `gemfragment`, and
+`cshell`. Equipment comparisons remain limited to equippable items.
+The merchant's collapsible
 **Ponty shopping list** uses the same removal and clear-all controls as its other
 automatic lists. Each entry matches the base item ID, including upgraded and stat
 variants. Entries authorize all matching lots, with no quantity or price ceiling.
