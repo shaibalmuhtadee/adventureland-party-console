@@ -11,10 +11,10 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
-  loneCrabFarm?(): { map: string; x: number; y: number } | null;
-  loneCrabFarmMove?(point?: { map: string; x: number; y: number }): boolean;
-  loneCrabFarmContains?(point: { map: string; x: number; y: number }): boolean;
-  getLoneCrabTarget?: TargetGetter;
+  rogueKnifeFarm?(): { map: string; x: number; y: number } | null;
+  rogueKnifeFarmMove?(point?: { map: string; x: number; y: number }): boolean;
+  rogueKnifeFarmContains?(point: { map: string; x: number; y: number }): boolean;
+  getRogueKnifeTarget?: TargetGetter;
   dungeonOwned?(): boolean;
   caveRecoveryReserved?(): boolean;
   caveRecoveryTick?(): Promise<boolean>;
@@ -106,7 +106,7 @@ export interface SharedCombat {
   smartLoot(): Promise<unknown>;
 }
 export interface CombatState {
-  crabFarm?: import('../farming/lone-crab.ts').CrabPositionDiagnostic | null;
+  crabFarm?: import('../farming/rogue-knives.ts').RogueKnifePositionDiagnostic | null;
   skill?: import('../skills/types.ts').SkillDiagnostic;
   entityRefresh?: import('../../combat/entity-refresh.ts').EntityRefreshDiagnostic;
   recovery?: { phase: string; attempt: number; lastError: string | null; errorAt: number | null; status: string; at: number; recoveredAt: number | null };

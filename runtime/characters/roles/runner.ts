@@ -128,7 +128,7 @@ export function installRoleRunner(
     return currentEpoch(epoch) && !character.rip && !sharedRoutine.isOccupied();
   }
   function chooseTarget() {
-    if (sharedRoutine.loneCrabFarm?.()) return sharedRoutine.getLoneCrabTarget?.() || null;
+    if (sharedRoutine.rogueKnifeFarm?.()) return sharedRoutine.getRogueKnifeTarget?.() || null;
     if (sharedRoutine.dungeonOwned?.()) return sharedRoutine.getDungeonTarget?.() || null;
     if(sharedRoutine.returnCombatActive?.())return sharedRoutine.returnDefenseTarget?.() || null;
     if (sharedRoutine.frankyCombatActive?.()) return sharedRoutine.getEventTarget();

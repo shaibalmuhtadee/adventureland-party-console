@@ -3,10 +3,10 @@ import { decision, type Combatant, type SkillDecision, type SkillWorld } from '.
 
 // Farming destinations use the shared navigation protocol's string map IDs.
 type Point = Pick<SkillWorld['actor'], 'x' | 'y'> & { map: string };
-export interface CrabPositionDiagnostic {
+export interface RogueKnifePositionDiagnostic {
   at: number; visible: number; inRegion: number; inRange: number; maxTargets: number;
   expectedTargets: number; destination: Point; holdUntil: number;
-  reason: 'spawn center' | 'waiting for crabs' | 'enough targets' | 'better batch' | 'no worthwhile move' | 'refreshing Kane aura';
+  reason: 'spawn center' | 'waiting for targets' | 'enough targets' | 'better batch' | 'no worthwhile move' | 'refreshing Kane aura';
 }
 interface PositionPorts {
   world(): SkillWorld;
@@ -16,23 +16,28 @@ interface PositionPorts {
   canMove(point: Point): boolean;
   move(point: Point): boolean;
   cooldownRemaining(): number;
-  report(diagnostic: CrabPositionDiagnostic | null): void;
+  report(diagnostic: RogueKnifePositionDiagnostic | null): void;
 }
-function eligibleCrabs(w: SkillWorld): Combatant[] {
-  return w.context.monsters.filter(t => t.mtype === 'crab' && t.visible !== false &&
+function focused(w: SkillWorld, t: Combatant): boolean {
+  return w.context.farmingScript === 'lone-crab' ? t.mtype === 'crab' :
+    !!w.context.farmingFocus?.includes(t.mtype);
+}
+function eligibleTargets(w: SkillWorld): Combatant[] {
+  return w.context.monsters.filter(t => focused(w, t) && t.visible !== false &&
     !t.dead && !t.rip && t.hp > w.incoming(t) && w.allowed(t, 'fanofknives') &&
     (!t.immune || w.skills.fanofknives?.pierces_immunity));
 }
 
 /** Reposition during cooldown; a ready cast waits at most 250ms for extra targets. */
-export function createCrabPositioner(ports: PositionPorts) {
+export function createRogueKnifePositioner(ports: PositionPorts) {
   let region = '', centered = false, planAt = 0;
   let moving: { point: Point; deadline: number; holdUntil: number } | null = null;
   const length = (a: Point, b: Point) => Math.hypot(a.x-b.x, a.y-b.y);
   function reset() { region = ''; centered = false; planAt = 0; moving = null; ports.report(null); }
   function sample(w: SkillWorld, center: Point) {
-    const visible = w.context.monsters.filter(t => t.mtype === 'crab' && t.visible !== false && !t.dead && t.hp > 0);
-    const eligible = eligibleCrabs(w), cap = w.skills.fanofknives?.max_targets || 5;
+    const visible = w.context.monsters.filter(t => focused(w, t) &&
+      t.visible !== false && !t.dead && t.hp > 0 && w.allowed(t, 'fanofknives'));
+    const eligible = eligibleTargets(w), cap = w.skills.fanofknives?.max_targets || 5;
     const range = w.skills.fanofknives?.range || 160;
     const count = (point: Point) => {
       // Preserve combat dimensions and replace real coordinates too: distance()
@@ -41,7 +46,7 @@ export function createCrabPositioner(ports: PositionPorts) {
       return Math.min(cap, eligible.filter(t => distance(actor, t) <= range).length);
     };
     const here = { map: w.actor.map, x: w.actor.x, y: w.actor.y }, current = count(here);
-    function report(point: Point, reason: CrabPositionDiagnostic['reason']) {
+    function report(point: Point, reason: RogueKnifePositionDiagnostic['reason']) {
       ports.report({ at: w.now, visible: visible.length,
         inRegion: visible.filter(t => ports.contains({map:w.actor.map,x:t.x,y:t.y})).length,
         inRange: eligible.filter(t => w.range(t, 'fanofknives')).length, maxTargets: cap,
@@ -55,14 +60,15 @@ export function createCrabPositioner(ports: PositionPorts) {
       if (!moving || Date.now() >= moving.holdUntil || !ports.center()) return false;
       const w = ports.world();
       // Aura recovery must never defer a ready Fan of Knives cast.
-      if (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0) return false;
-      return w.context.farmingScript === 'lone-crab' &&
-        eligibleCrabs(w).filter(t => w.range(t, 'fanofknives')).length <= 2;
+      if (w.context.farmingScript === 'lone-crab' &&
+          (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0)) return false;
+      return !!w.context.farmingScript &&
+        eligibleTargets(w).filter(t => w.range(t, 'fanofknives')).length <= 2;
     },
     tick(): boolean {
       const center = ports.center(), w = ports.world();
-      if (!center || w.context.farmingScript !== 'lone-crab' || w.context.mode === 'blocked') { reset(); return false; }
-      const key = JSON.stringify(center);
+      if (!center || !w.context.farmingScript || w.context.mode === 'blocked') { reset(); return false; }
+      const key = JSON.stringify([w.context.farmingScript, w.context.farmingFocus, center]);
       if (key !== region) { reset(); region = key; }
       const s = sample(w, center);
       const refresh = ports.auraRecovery(w.actor);
@@ -112,19 +118,19 @@ export function createCrabPositioner(ports: PositionPorts) {
         moving = { point: best, deadline: w.now + seconds*1000, holdUntil: w.now + Math.min(250, bestDistance/Math.max(1,w.actor.speed)*1000) };
         s.report(best, 'better batch'); return ports.move(best);
       }
-      s.report(s.here, s.eligible.length ? 'no worthwhile move' : 'waiting for crabs');
+      s.report(s.here, s.eligible.length ? 'no worthwhile move' : 'waiting for targets');
       return ports.move(s.here);
     },
   };
 }
 
-/** The native skill shares the attack cooldown. Keep every ready cast for crabs. */
-export function loneCrabAttack(w: SkillWorld): SkillDecision | null {
+/** The native skill shares the attack cooldown. Keep every ready cast for the farm. */
+export function rogueKnifeAttack(w: SkillWorld): SkillDecision | null {
   const cap = w.skills.fanofknives?.max_targets || 5;
-  const targets = eligibleCrabs(w).filter(t =>
+  const targets = eligibleTargets(w).filter(t =>
     !blocked(w, decision('fanofknives', [t])))
     .sort((a, b) => Math.hypot(a.x-w.actor.x,a.y-w.actor.y) -
       Math.hypot(b.x-w.actor.x,b.y-w.actor.y) || a.id.localeCompare(b.id))
     .slice(0, cap);
-  return targets.length ? decision('fanofknives', targets, 'damage', 'lone crab farm') : null;
+  return targets.length ? decision('fanofknives', targets, 'damage', 'rogue knife farm') : null;
 }

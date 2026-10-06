@@ -2,6 +2,12 @@
 
 ### Lone rogue crab farming
 
+Rogue Scatter uses the same Fan of Knives batching and positioning for the selected
+monster focus and farm region, including Goo. It works independently with other
+fighters in the party and never seeks Kane's aura, even when scattering on crabs.
+Choose Scatter and a Goo region to use it there. It retains the current crab
+strategy's potion thresholds and Fan of Knives requirements below.
+
 Select only Tiny Crab (`crab`) as the rogue's monster focus and choose its spawn
 region. With no other non-merchant party member or assigned farming participant,
 the rogue starts at that region's center and casts `fanofknives` at up to five eligible
@@ -24,7 +30,7 @@ then resumes normal farm positioning. Active buffs impose no movement boundary
 or return timer. Terrain alternatives are sampled when the nearest entry is
 blocked; Kane's last observed location is retained if he leaves client visibility.
 
-This farm uses MP potions below 80% MP, with HP potions below 50% taking priority.
+This farm uses MP potions below 50% MP, with HP potions below 50% taking priority.
 Keep `mpot1` stocked and enable MP restocking if needed. Fan of Knives requires
 level 65 and an equipped `knifebelt`. The farm reserves attack cooldowns for that
 skill instead of using basic attacks or other rogue damage skills. Travel,

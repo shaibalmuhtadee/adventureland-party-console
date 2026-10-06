@@ -150,7 +150,7 @@
   var role5 = {
     name: "rogue",
     combat: true,
-    usePotion: () => sharedRoutine.loneCrabFarm?.() ? sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.8, priority: "hp" }) : Promise.resolve(false),
+    usePotion: () => sharedRoutine.rogueKnifeFarm?.() ? sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" }) : Promise.resolve(false),
     beforeTarget: () => sharedRoutine.skillSupport?.() ?? Promise.resolve(false),
     beforeAttack: (target) => sharedRoutine.skillOffense?.(target) ?? Promise.resolve(false)
   };
@@ -922,7 +922,7 @@
     return Object.entries(s.requirements || {}).every(([key, value]) => Number(Reflect.get(w.actor, key)) >= Number(value));
   }
   function reserve(w) {
-    if (w.context.farmingScript === "lone-crab") return 0;
+    if (!!w.context.farmingScript) return 0;
     const availableCost = (id) => unlocked(w, id) ? cost(w, id) : 0;
     const c = w.actor.ctype;
     if (c === "paladin") return Math.max(w.actor.max_mp * 0.3, 2 * availableCost("selfheal") + availableCost("guardians_oath"));
@@ -1019,11 +1019,14 @@
     return choices.sort((a, b) => score(b) - score(a));
   }
 
-  // runtime/characters/farming/lone-crab.ts
-  function eligibleCrabs(w) {
-    return w.context.monsters.filter((t) => t.mtype === "crab" && t.visible !== false && !t.dead && !t.rip && t.hp > w.incoming(t) && w.allowed(t, "fanofknives") && (!t.immune || w.skills.fanofknives?.pierces_immunity));
+  // runtime/characters/farming/rogue-knives.ts
+  function focused(w, t) {
+    return w.context.farmingScript === "lone-crab" ? t.mtype === "crab" : !!w.context.farmingFocus?.includes(t.mtype);
   }
-  function createCrabPositioner(ports) {
+  function eligibleTargets(w) {
+    return w.context.monsters.filter((t) => focused(w, t) && t.visible !== false && !t.dead && !t.rip && t.hp > w.incoming(t) && w.allowed(t, "fanofknives") && (!t.immune || w.skills.fanofknives?.pierces_immunity));
+  }
+  function createRogueKnifePositioner(ports) {
     let region = "", centered = false, planAt = 0;
     let moving = null;
     const length = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -1035,8 +1038,8 @@
       ports.report(null);
     }
     function sample(w, center) {
-      const visible = w.context.monsters.filter((t) => t.mtype === "crab" && t.visible !== false && !t.dead && t.hp > 0);
-      const eligible = eligibleCrabs(w), cap = w.skills.fanofknives?.max_targets || 5;
+      const visible = w.context.monsters.filter((t) => focused(w, t) && t.visible !== false && !t.dead && t.hp > 0 && w.allowed(t, "fanofknives"));
+      const eligible = eligibleTargets(w), cap = w.skills.fanofknives?.max_targets || 5;
       const range = w.skills.fanofknives?.range || 160;
       const count = (point) => {
         const actor = { ...w.actor, x: point.x, y: point.y, real_x: point.x, real_y: point.y };
@@ -1063,16 +1066,16 @@
       held() {
         if (!moving || Date.now() >= moving.holdUntil || !ports.center()) return false;
         const w = ports.world();
-        if (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0) return false;
-        return w.context.farmingScript === "lone-crab" && eligibleCrabs(w).filter((t) => w.range(t, "fanofknives")).length <= 2;
+        if (w.context.farmingScript === "lone-crab" && (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0)) return false;
+        return !!w.context.farmingScript && eligibleTargets(w).filter((t) => w.range(t, "fanofknives")).length <= 2;
       },
       tick() {
         const center = ports.center(), w = ports.world();
-        if (!center || w.context.farmingScript !== "lone-crab" || w.context.mode === "blocked") {
+        if (!center || !w.context.farmingScript || w.context.mode === "blocked") {
           reset();
           return false;
         }
-        const key = JSON.stringify(center);
+        const key = JSON.stringify([w.context.farmingScript, w.context.farmingFocus, center]);
         if (key !== region) {
           reset();
           region = key;
@@ -1135,15 +1138,15 @@
           s.report(best, "better batch");
           return ports.move(best);
         }
-        s.report(s.here, s.eligible.length ? "no worthwhile move" : "waiting for crabs");
+        s.report(s.here, s.eligible.length ? "no worthwhile move" : "waiting for targets");
         return ports.move(s.here);
       }
     };
   }
-  function loneCrabAttack(w) {
+  function rogueKnifeAttack(w) {
     const cap = w.skills.fanofknives?.max_targets || 5;
-    const targets = eligibleCrabs(w).filter((t) => !blocked(w, decision("fanofknives", [t]))).sort((a, b) => Math.hypot(a.x - w.actor.x, a.y - w.actor.y) - Math.hypot(b.x - w.actor.x, b.y - w.actor.y) || a.id.localeCompare(b.id)).slice(0, cap);
-    return targets.length ? decision("fanofknives", targets, "damage", "lone crab farm") : null;
+    const targets = eligibleTargets(w).filter((t) => !blocked(w, decision("fanofknives", [t]))).sort((a, b) => Math.hypot(a.x - w.actor.x, a.y - w.actor.y) - Math.hypot(b.x - w.actor.x, b.y - w.actor.y) || a.id.localeCompare(b.id)).slice(0, cap);
+    return targets.length ? decision("fanofknives", targets, "damage", "rogue knife farm") : null;
   }
 
   // runtime/characters/skills/protection.ts
@@ -1267,7 +1270,7 @@
       if (pending.has(family(w, d.skill)) || (failures.get(d.skill) || 0) > w.now) return false;
       const cap = Math.max(0, ...Object.keys(w.skills).map((id) => id).filter((id) => unlocked(w, id) && cost(w, id) <= w.actor.mp - reserve(w)).map((id) => cost(w, id)));
       const credit = budget.observe(w.now, w.actor.mp, w.actor.mp - reserve(w), cap);
-      if (d.category === "damage" && w.context.mode !== "event" && !(w.context.farmingScript === "lone-crab" && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
+      if (d.category === "damage" && w.context.mode !== "event" && !(!!w.context.farmingScript && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
         report(w, d, "skipped", "sustained farming MP budget");
         return false;
       }
@@ -1339,21 +1342,21 @@
       },
       support() {
         const w = world();
-        if (w.context.farmingScript === "lone-crab") return Promise.resolve(false);
+        if (!!w.context.farmingScript) return Promise.resolve(false);
         const choices = w.actor.ctype === "paladin" ? paladinSupport(w) : w.actor.ctype === "rogue" ? rogueSupport(w) : combatBuffSupport(w);
         return first(choices.filter((d) => d.skill !== "paladin_aura" || w.now - auraAt >= 1e4 && d.argument !== auraState));
       },
       offense(target) {
         const w = world();
-        if (w.context.farmingScript === "lone-crab") return Promise.resolve(false);
+        if (!!w.context.farmingScript) return Promise.resolve(false);
         return first(damageChoices(w, target));
       },
       attack(target) {
         const w = world();
         if (w.context.mode === "blocked" || !["ranger", "rogue"].includes(w.actor.ctype)) return null;
-        if (w.context.farmingScript === "lone-crab") {
-          if (ports.loneCrabAttackHeld?.()) return Promise.resolve(false);
-          const d2 = loneCrabAttack(w);
+        if (!!w.context.farmingScript) {
+          if (ports.rogueKnifeAttackHeld?.()) return Promise.resolve(false);
+          const d2 = rogueKnifeAttack(w);
           return d2 ? execute(d2) : Promise.resolve(false);
         }
         const opening = opener(w, target);
@@ -1535,20 +1538,20 @@
       height: (entity) => host.get_height(entity),
       canMove: (point) => can_move_to(point.x, point.y)
     });
-    const crabPositioner = createCrabPositioner({
+    const knifePositioner = createRogueKnifePositioner({
       world,
-      center: () => shared.loneCrabFarm?.() || null,
-      auraRecovery: (actor) => kaneAura.destination(actor),
-      contains: (point) => shared.loneCrabFarmContains?.(point) ?? false,
+      center: () => shared.rogueKnifeFarm?.() || null,
+      auraRecovery: (actor) => world().context.farmingScript === "lone-crab" ? kaneAura.destination(actor) : null,
+      contains: (point) => shared.rogueKnifeFarmContains?.(point) ?? false,
       canMove: (point) => can_move_to(point.x, point.y),
-      move: (point) => shared.loneCrabFarmMove?.(point) ?? false,
+      move: (point) => shared.rogueKnifeFarmMove?.(point) ?? false,
       cooldownRemaining: () => Math.max(0, Number(host.next_skill?.attack) - Date.now()) || 0,
       report: (diagnostic) => {
         if (root.partyCombatState) root.partyCombatState.crabFarm = diagnostic;
       }
     });
     const engine = createSkillEngine({
-      loneCrabAttackHeld: () => crabPositioner.held(),
+      rogueKnifeAttackHeld: () => knifePositioner.held(),
       world,
       cast: castSkill,
       evidence: (t, state, action2) => shared.queueEvidence?.(t, state, action2) || null,
@@ -1569,16 +1572,16 @@
     host.socket?.on?.("hit", hit);
     return {
       ...engine,
-      farmMovement: () => crabPositioner.tick(),
+      farmMovement: () => knifePositioner.tick(),
       reset() {
         engine.reset();
         projectiles.clear();
-        crabPositioner.reset();
+        knifePositioner.reset();
       },
       stop() {
         engine.stop();
         projectiles.clear();
-        crabPositioner.reset();
+        knifePositioner.reset();
         host.socket?.off?.("action", action);
         host.socket?.off?.("hit", hit);
       }
@@ -2859,7 +2862,7 @@
       return currentEpoch(epoch) && !character.rip && !sharedRoutine.isOccupied();
     }
     function chooseTarget() {
-      if (sharedRoutine.loneCrabFarm?.()) return sharedRoutine.getLoneCrabTarget?.() || null;
+      if (sharedRoutine.rogueKnifeFarm?.()) return sharedRoutine.getRogueKnifeTarget?.() || null;
       if (sharedRoutine.dungeonOwned?.()) return sharedRoutine.getDungeonTarget?.() || null;
       if (sharedRoutine.returnCombatActive?.()) return sharedRoutine.returnDefenseTarget?.() || null;
       if (sharedRoutine.frankyCombatActive?.()) return sharedRoutine.getEventTarget();

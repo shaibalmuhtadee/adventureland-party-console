@@ -4,7 +4,7 @@ import { createSkillEngine } from './engine.ts';
 import { decision, type Actor, type Combatant, type CombatContext, type SkillDefinition, type SkillDecision, type SkillId, type SkillWorld } from './types.ts';
 import { incomingDps } from './damage.ts';
 import { createProjectileTracker } from './projectiles.ts';
-import { createCrabPositioner } from '../farming/lone-crab.ts';
+import { createRogueKnifePositioner } from '../farming/rogue-knives.ts';
 import { createKaneAuraRecovery } from '../farming/kane-aura.ts';
 
 interface Host {
@@ -91,18 +91,18 @@ export function installSkillRuntime(root: CombatRoot) {
     height: entity => host.get_height(entity),
     canMove: point => can_move_to(point.x,point.y),
   });
-  const crabPositioner = createCrabPositioner({
+  const knifePositioner = createRogueKnifePositioner({
     world,
-    center: () => shared.loneCrabFarm?.() || null,
-    auraRecovery: actor => kaneAura.destination(actor),
-    contains: point => shared.loneCrabFarmContains?.(point) ?? false,
+    center: () => shared.rogueKnifeFarm?.() || null,
+    auraRecovery: actor => world().context.farmingScript === 'lone-crab' ? kaneAura.destination(actor) : null,
+    contains: point => shared.rogueKnifeFarmContains?.(point) ?? false,
     canMove: point => can_move_to(point.x, point.y),
-    move: point => shared.loneCrabFarmMove?.(point) ?? false,
+    move: point => shared.rogueKnifeFarmMove?.(point) ?? false,
     cooldownRemaining: () => Math.max(0, Number(host.next_skill?.attack) - Date.now()) || 0,
     report: diagnostic => { if (root.partyCombatState) root.partyCombatState.crabFarm = diagnostic; },
   });
   const engine = createSkillEngine({
-    loneCrabAttackHeld: () => crabPositioner.held(),
+    rogueKnifeAttackHeld: () => knifePositioner.held(),
     world,
     cast:castSkill,
     evidence: (t, state, action) => shared.queueEvidence?.(t as Target, state, action) || null,
@@ -120,10 +120,10 @@ export function installSkillRuntime(root: CombatRoot) {
   host.socket?.on?.('action', action);
   host.socket?.on?.('hit', hit);
   return { ...engine,
-    farmMovement: () => crabPositioner.tick(),
-    reset() { engine.reset(); projectiles.clear(); crabPositioner.reset(); },
+    farmMovement: () => knifePositioner.tick(),
+    reset() { engine.reset(); projectiles.clear(); knifePositioner.reset(); },
     stop() {
-      engine.stop(); projectiles.clear(); crabPositioner.reset();
+      engine.stop(); projectiles.clear(); knifePositioner.reset();
       host.socket?.off?.('action', action); host.socket?.off?.('hit', hit);
     },
   };

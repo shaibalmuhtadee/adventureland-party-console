@@ -13286,7 +13286,7 @@
       Math.hypot(character.x-anchor.x,character.y-anchor.y) <= groupedCombat.range;
   }
   function groupedAttackAllowed(target) {
-    if (loneCrabFarm() && target && target.mtype === 'crab' && isAllowedTarget(target) &&
+    if (rogueKnifeFarm() && target && monsterFocus.indexOf(target.mtype) >= 0 && isAllowedTarget(target) &&
         (!target.target || target.target === character.name)) return true;
     if (dungeonOwned()) return !!(character.cave && !character.cave.paused && dungeonTargetAllowed(target) && groupedFresh() &&
       groupedCombat.target?.id === target.id && groupedCombat.committed);
@@ -13498,9 +13498,9 @@
     return true;
   }
   function leaderLockAllows(target) {
-    // Fan of Knives pulls multiple crabs. The ordinary group lock selects only
+    // Fan of Knives pulls multiple farm targets. The ordinary group lock selects only
     // one monster; remaining eligibility checks still enforce bounds and claims.
-    if (target && target.mtype === 'crab' && loneCrabFarm()) return true;
+    if (target && monsterFocus.indexOf(target.mtype) >= 0 && rogueKnifeFarm()) return true;
     if(!groupedFarming())return true;
     return !!(target && groupedCombat && groupedCombat.protocol===4 && groupedCombat.target &&
       groupedCombat.target.id===target.id && groupedCombat.target.map===character.map &&
@@ -15809,11 +15809,14 @@
     return false;
   }
 
-  function loneCrabFarm() {
-    if (character.ctype !== 'rogue' || character.rip || monsterFocus.length !== 1 || monsterFocus[0] !== 'crab' ||
+  function rogueKnifeFarm() {
+    if (character.ctype !== 'rogue' || character.rip || !monsterFocus.length ||
+        (farmingMode !== 'scatter' && (monsterFocus.length !== 1 || monsterFocus[0] !== 'crab')) ||
         !partyLocation || partyLocation.map !== character.map || navigationIntent.cancelled ||
         root.sharedRoutine.isOccupied() || activeCombatEvent() || joinedEvent || dungeonOwned() ||
         travelCombatActive() || returnCombatActive() || typeof rareActive === 'function' && rareActive()) return null;
+    if (farmingMode === 'scatter') return { map: partyLocation.map, x: partyLocation.x, y: partyLocation.y };
+    // The legacy crab strategy requires a solo fighter; Scatter farms independently.
     // Count the actual roster, including off-map members. Missing class data cannot prove solo.
     var party = typeof get_party === 'function' && get_party() || {};
     if (currentPartyList().some(function(name) {
@@ -15826,30 +15829,30 @@
     return { map: partyLocation.map, x: partyLocation.x, y: partyLocation.y };
   }
 
-  function loneCrabFarmMove(destination) {
-    var farm = loneCrabFarm();
+  function rogueKnifeFarmMove(destination) {
+    var farm = rogueKnifeFarm();
     if (!farm) return false;
     var center = destination || farm;
-    cancelGroupRoute(); cancelFightRoute(); cancelFarmApproach('lone crab farm owns positioning');
+    cancelGroupRoute(); cancelFightRoute(); cancelFarmApproach('rogue knife farm owns positioning');
     if (Math.hypot(character.x-center.x, character.y-center.y) <= 1) {
       resetCombatMovement();
-      root.partyCombatPosition = { at: Date.now(), mode: 'lone-crab-hold', movementOwner: 'combat', destination: center };
+      root.partyCombatPosition = { at: Date.now(), mode: 'rogue-knives-hold', movementOwner: 'combat', destination: center };
       return true;
     }
     if (typeof can_move_to === 'function' && can_move_to(center.x, center.y))
-      return sendCombatMove({ id: 'lone-crab-position', x: center.x, y: center.y }, center, 'lone-crab-position');
+      return sendCombatMove({ id: 'rogue-knives-position', x: center.x, y: center.y }, center, 'rogue-knives-position');
     root.partyCombatPosition = { at: Date.now(), mode: 'blocked', movementOwner: 'combat', destination: center,
-      reason: 'Crab farming position is not directly reachable' };
+      reason: 'Rogue farming position is not directly reachable' };
     return true;
   }
 
   root.sharedRoutine = {
-    loneCrabFarm: loneCrabFarm,
-    loneCrabFarmContains: function(point) { return !!partyLocation && inFarmArea(point, partyLocation, 0); },
-    loneCrabFarmMove: loneCrabFarmMove,
-    getLoneCrabTarget: function() {
+    rogueKnifeFarm: rogueKnifeFarm,
+    rogueKnifeFarmContains: function(point) { return !!partyLocation && inFarmArea(point, partyLocation, 0); },
+    rogueKnifeFarmMove: rogueKnifeFarmMove,
+    getRogueKnifeTarget: function() {
       return Object.values(parent.entities || {}).filter(function(t) {
-        return t && t.type === 'monster' && t.mtype === 'crab' && t.visible && !t.dead && t.hp > 0 &&
+        return t && t.type === 'monster' && monsterFocus.indexOf(t.mtype) >= 0 && t.visible && !t.dead && t.hp > 0 &&
           (!t.target || t.target === character.name) && isAllowedTarget(t);
       }).sort(function(a,b) { return combatDistance(a)-combatDistance(b); })[0] || null;
     },
@@ -16236,7 +16239,8 @@
         G.maps[character.map] && G.maps[character.map].event === event.name ||
         monsters.some(function(m){return event.types.indexOf(m.mtype) >= 0;}));
       return { leader: leader || character.name, allies: allies, monsters: monsters,
-        farmingScript: loneCrabFarm() ? 'lone-crab' : undefined,
+        farmingScript: rogueKnifeFarm() ? farmingMode === 'scatter' ? 'rogue-scatter' : 'lone-crab' : undefined,
+        farmingFocus: monsterFocus.slice(),
         event: eventCombat ? event.name : null,
         mode: root.sharedRoutine.isOccupied() || isLiveAbtesting() ? "blocked" : eventCombat ? "event" : !character.cave && farmingMode === "scatter" ? "scatter" : "grouped",
         observedAt: parent.socket && parent.socket.connected ? Date.now() : 0 };

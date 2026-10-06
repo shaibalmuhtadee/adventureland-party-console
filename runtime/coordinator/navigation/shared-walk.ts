@@ -86,7 +86,7 @@ export function createSharedWalks(input: unknown, ports: WalkPorts) {
   function halloweenCurrent(r: WalkRequest): boolean {
     const source = eventPolicy(state, r.name).source, realm = state.statuses[r.name]?.server;
     const commitment = state.halloweenAttendance?.[JSON.stringify([source, realm])];
-    if (!commitment || commitment.phase === 'idle' || commitment.phase === 'waiting' ||
+    if (!commitment || (commitment.phase !== 'preparing' && commitment.phase !== 'attending') ||
         commitment.generation !== r.halloweenGeneration || distance(commitment.encounter, r.destination) > 1) return false;
     if (commitment.phase === 'attending') return commitment.lastLiveAt >= ports.now() - 10000;
     const reporter = state.statuses[source];
