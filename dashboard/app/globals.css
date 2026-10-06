@@ -4,6 +4,23 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Public URLs avoid Vinext emitting Windows filesystem paths for next/font. */
+@font-face {
+  font-family: 'Geist';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-latin.woff2') format('woff2');
+}
+
+@font-face {
+  font-family: 'Geist Mono';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/geist-mono-latin.woff2') format('woff2');
+}
+
 /* Reserve icon columns only on top-level inventory/equipment menu rows. */
 .item-action-menu > :is([data-slot='context-menu-item'], [data-slot='context-menu-sub-trigger']) {
   position: relative;
@@ -66,6 +83,8 @@ body {
 }
 
 :root {
+  --font-geist-sans: 'Geist', Arial, Helvetica, sans-serif;
+  --font-geist-mono: 'Geist Mono', Consolas, 'Liberation Mono', monospace;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
