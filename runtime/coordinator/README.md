@@ -19,13 +19,23 @@ and Mr. Green server reports through `runtime/events/halloween.ts`. The
 `events/halloween.ts` service commits one boss for each event-policy source and
 realm, persists its generation, and publishes it through heartbeats. Following
 characters use that same encounter. Raw boss observations remain independent of
-the commitment, so an active season without live bosses cannot pause ordinary
-activity. Halloween walks carry the encounter generation; cleanup can cancel the
+the commitment, so an active season without live bosses or a due announced spawn
+cannot pause ordinary activity. An announced spawn owns preparation from 60 seconds
+before its deadline through a 30-second allowance for the live report. Preparation
+uses the registered boss spawn area and keeps the same route generation when the
+boss becomes live. Scheduled spawns take priority over ordinary live attendance
+inside that window. Halloween walks carry the encounter generation; cleanup can cancel the
 matching old walk after its generation is revoked. Merchant loss of another tank
 requests its own protected event return. Existing attendance, Hunt, respawn, and
 saved-waypoint recovery retain ownership. Activate with the ordinary full
 `scripts/start-console.ps1` restart to publish both coordinator and character code.
 The user verifies this feature manually in game.
+
+Event deselection acknowledgements retry outside the status heartbeat. A pending
+return or unavailable acknowledgement must not block encounter updates or convoy
+command delivery. Deselections with no remaining attendance acknowledge without
+starting or blocking another return; an Anniversary combat handoff already
+transferred that ownership.
 
 Merchant settings stores one Main-map stand location for parking, Town-return
 checks and marketplace fallbacks. A fresh settings store chooses integer X/Y

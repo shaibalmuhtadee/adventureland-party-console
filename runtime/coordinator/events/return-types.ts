@@ -45,6 +45,7 @@ export interface EventReturnState {
   deferred: Record<string, { cycleId: string }>;
 }
 export interface ReturnStatus {
+  halloweenObservation?: import('../../events/halloween.ts').HalloweenObservation | null;
   x?: number;
   y?: number;
   map?: string;

@@ -23,6 +23,7 @@ export interface SharedReport {
   failure?: string; waypointCount?: number; departedAt?: number;
 }
 export interface SharedStatus extends RoutePoint {
+  halloweenObservation?: import('../../events/halloween.ts').HalloweenObservation | null;
   activeEvent?: string | null; joinedEvent?: string | null;
   movementGeometry?: { version: number; fingerprint: string };
   huntReturnProtocol?: number;

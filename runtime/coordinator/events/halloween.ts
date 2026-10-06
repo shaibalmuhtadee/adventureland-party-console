@@ -1,6 +1,6 @@
 import { eventPolicy } from '../../../dashboard/lib/event-policy.ts';
-import { rankHalloweenBosses, type HalloweenAttendance, type HalloweenAttendanceReport,
-  type HalloweenObservation } from '../../events/halloween.ts';
+import { halloweenPreparation, sameHalloweenSpawn, rankHalloweenBosses, type HalloweenAttendance, type HalloweenAttendanceReport,
+  type HalloweenObservation, type HalloweenSpawn } from '../../events/halloween.ts';
 
 interface State {
   leader: string | null;
@@ -74,6 +74,26 @@ export function createHalloweenAttendance(state: State, ports: Ports) {
     ports.persist();
     return attendance;
   }
+  function prepare(previous: HalloweenAttendance | undefined,
+    owner: {source: string; realm: string; generation: number}, encounter: HalloweenSpawn): HalloweenAttendance {
+    if (previous?.phase === 'preparing' && sameHalloweenSpawn(previous.encounter, encounter)) return previous;
+    const attendance: HalloweenAttendance = {...owner, generation: owner.generation + 1, phase: 'preparing', encounter};
+    state.halloweenAttendance![JSON.stringify([owner.source, owner.realm])] = attendance;
+    ports.persist();
+    return attendance;
+  }
+  function spawned(previous: HalloweenAttendance | undefined, observation: HalloweenObservation, now: number): HalloweenAttendance | null {
+    if (previous?.phase !== 'preparing') return null;
+    const live = observation.bosses.find(boss => boss.type === previous.encounter.type);
+    if (!live) return null;
+    // Preserve the shared walking destination and generation across the spawn.
+    const attendance: HalloweenAttendance = {source: previous.source, realm: previous.realm,
+      generation: previous.generation, phase: 'attending', lastLiveAt: now,
+      encounter: {...live, map: previous.encounter.map, x: previous.encounter.x, y: previous.encounter.y}};
+    state.halloweenAttendance![JSON.stringify([previous.source, previous.realm])] = attendance;
+    ports.persist();
+    return attendance;
+  }
   function response(name: string): HalloweenAttendanceReport {
     const source = eventPolicy(state, name).source, now = ports.now();
     const reporter = state.statuses[source], realm = reporter?.server || '';
@@ -84,6 +104,10 @@ export function createHalloweenAttendance(state: State, ports: Ports) {
     const observation = freshObservation(source, realm, name, now);
     if (!observation)
       return { ...owner, phase: 'waiting', validUntil: now + 10000 };
+    const arrival = spawned(previous, observation, now);
+    if (arrival) return {...arrival, validUntil: now + 10000};
+    const upcoming = halloweenPreparation(observation, now);
+    if (upcoming) return {...prepare(previous, owner, upcoming), validUntil: now + 10000};
     const retained = retain(previous, observation, now);
     if (retained) store[key] = retained;
     const attendance = retained || advance(name, previous, owner, observation, now);

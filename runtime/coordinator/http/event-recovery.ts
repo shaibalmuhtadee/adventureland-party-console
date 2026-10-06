@@ -1,7 +1,7 @@
 import { requestObject, requestText, type HttpRequest, type HttpResponse } from "./contracts.ts";
 import type { AnniversaryCycle } from "../anniversary/contracts.ts";
 import type { Waypoints } from "../events/return-types.ts";
-import { isHalloweenBoss, type HalloweenObservation } from '../../events/halloween.ts';
+import { halloweenPreparation, isHalloweenBoss, type HalloweenObservation } from '../../events/halloween.ts';
 
 interface EventSession {
   event?: string;
@@ -82,21 +82,31 @@ export function createEventRecoveryRoutes(state: RecoveryState, ports: RecoveryP
     const body = requestObject(req.body),
       name = requestText(body.character),
       event = requestText(body.event);
-    if (state.eventReturn && state.eventReturn.event !== event)
-      return res.status(409).json({ error: "another return is in progress" });
     if (!ports.owned(name) || ports.enabled(name, event))
       return res.status(409).json({ error: "event remains enabled" });
+    // A completed/handed-off selection needs only an acknowledgement. It must
+    // not block delivery of the commands for the return that already owns it.
+    if (!needsDisabledReturn(name, event))
+      return res.json({ ok: true, anniversary: ports.snapshot() });
+    if (state.eventReturn && state.eventReturn.event !== event)
+      return res.status(409).json({ error: "another return is in progress" });
     if (event === "anniversary") disableAnniversary(name);
     else disableCombat(name, event);
     return res.json({ ok: true, anniversary: ports.snapshot() });
+  }
+  function needsDisabledReturn(name: string, event: string): boolean {
+    if (event !== "anniversary") return state.eventSessions[name]?.event === event;
+    const cycle = state.anniversary.eventCycle;
+    return !!cycle && !cycle.returnDispatchedAt && !cycle.abortedAt && !cycle.combatHandoffAt &&
+      !!cycle.participants?.includes(name);
   }
   function stillInside(event: string): boolean {
     return ports.active().some((name) => {
       const status = state.statuses[name];
       return (
         ports.enabled(name, event) &&
-        Array.isArray(status?.serverLiveEvents) &&
-        status.serverLiveEvents.some((entry) => entry?.name === event)
+        (status?.serverLiveEvents?.some((entry) => entry?.name === event) ||
+          event === 'halloween' && !!halloweenPreparation(status?.halloweenObservation, Date.now()))
       );
     });
   }

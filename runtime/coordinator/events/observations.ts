@@ -6,6 +6,7 @@ import type {
   ReturnRoute,
   Waypoints,
 } from "./return-types.ts";
+import { halloweenPreparation } from '../../events/halloween.ts';
 
 export interface EventSession {
   event: string;
@@ -225,10 +226,15 @@ export function createEventObservations(
       .some(
         (name) =>
           ports.enabled(name, event) &&
-          ports.statuses()[name]?.serverLiveEvents?.some((entry) => entry && entry.name === event),
+          (ports.statuses()[name]?.serverLiveEvents?.some((entry) => entry && entry.name === event) ||
+            event === 'halloween' && preparingHalloween(ports.statuses()[name])),
       );
   }
 
+  function preparingHalloween(status: ReturnStatus | undefined): boolean {
+    return !!status && Number(status.seenAt) >= ports.now() - 10000 &&
+      !!halloweenPreparation(status.halloweenObservation, ports.now());
+  }
   function ended(name: string, session: EventSession): boolean {
     if (!session || !ports.enabled(name, session.event)) return false;
     const latest = Math.max(

@@ -3,12 +3,23 @@
 Halloween selects Mr. Pumpkin and Mr. Green on the current realm. The seasonal
 flag alone does not interrupt ordinary activity. The coordinator commits one
 boss per attendance group, initially choosing the lowest HP fraction and keeping
-that choice while it lives. Followers share that choice; independent characters
+that choice until a scheduled spawn enters its preparation window. Followers share that choice; independent characters
 keep their own attendance. Characters walk to the reported boss map rather than
 calling `join`. Mr. Pumpkin normally spawns on Halloween and Mr. Green on
 Spookytown. Short feed gaps, remaining attackers, and pending loot delay a boss
 switch. After a walking leg finishes, a moved boss can supply a new shared
 destination without changing the encounter.
+Seeing a boss does not cancel the shared walking leg. After shared arrival,
+each character closes any remaining gap to its visible target until the native
+attack-range check succeeds, using the target's current position if it moves.
+The same approach applies to independent attendance and respawn reentry.
+When the server announces either boss's next spawn, enabled characters start
+travelling to its registered spawn area with 60 seconds remaining. They wait there
+without acquiring the absent boss as a combat target. The live spawn retains the
+preparation route's generation and then hands off to normal combat. If the live
+report is delayed, preparation holds for up to 30 seconds past the announced time.
+Missing or stale timing does not trigger travel. Rescheduled spawns and deselection
+use the existing cancellation and saved-activity recovery flow.
 When neither boss remains, the existing event recovery resumes farming or Hunt.
 Unchecking Halloween returns actual participants while the boss may remain alive.
 

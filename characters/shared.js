@@ -452,8 +452,10 @@
     return names.map(function(id) {
       if (id === "halloween") {
         var halloween = halloweenObservation();
+        var preparation = root.partyHalloweenEvents.preparation(halloween, Date.now() + coordinatorClockOffset);
         return { id: id, name: "Halloween", live: Date.now() - eventFeedAt <= 120000 && halloween.bosses.length > 0,
-          next: halloween.next, statusLabel: halloween.season ? "Season active; waiting for a boss" : "Season inactive" };
+          next: halloween.next, statusLabel: preparation ? "Preparing for " + (preparation.type === "mrpumpkin" ? "Mr. Pumpkin" : "Mr. Green") :
+            halloween.season ? "Season active; waiting for a boss" : "Season inactive" };
       }
       var value = status[id] || {};
       var schedule = status.schedule || {}, kind = ["crabxx", "goobrawl", "abtesting"].indexOf(id) >= 0 ? "daily" : ["icegolem", "franky"].indexOf(id) >= 0 ? "nightly" : null;
@@ -478,18 +480,26 @@
   var partyEventHint = null;
   var halloweenAttendance = null;
   function halloweenObservation() {
-    return root.partyHalloweenEvents.observe(eventStatus(), G, eventFeedAt + coordinatorClockOffset);
+    var observation = root.partyHalloweenEvents.observe(eventStatus(), G, eventFeedAt + coordinatorClockOffset);
+    // eventStatus maps game timestamps to the character's wall clock. Publish
+    // upcoming deadlines on the coordinator clock, just like the feed timestamp.
+    observation.upcoming = (observation.upcoming || []).map(function(spawn) {
+      return Object.assign({}, spawn, {spawnAt: spawn.spawnAt + coordinatorClockOffset});
+    });
+    if (typeof observation.next === "number") observation.next += coordinatorClockOffset;
+    return observation;
   }
   function halloweenCommitment() {
     var value = halloweenAttendance;
     var source = character.ctype !== "merchant" && followLeader && leader ? leader : character.name;
-    return value && value.phase === "attending" && value.source === source && value.realm === reunionRealm() &&
+    return value && (value.phase === "attending" || value.phase === "preparing") && value.source === source && value.realm === reunionRealm() &&
       value.validUntil > Date.now() + coordinatorClockOffset ? value : null;
   }
   function halloweenMerchantSafe(target) {
     if (character.ctype !== "merchant") return true;
     var commitment = halloweenCommitment();
     if (!commitment || Date.now() - eventFeedAt > 120000) return false;
+    if (commitment.phase === "preparing") return true;
     var observed = halloweenObservation().bosses.find(function(boss) { return boss.type === commitment.encounter.type; });
     var visible = target || Object.values(parent.entities || {}).find(function(entity) {
       return entity && entity.type === "monster" && entity.mtype === commitment.encounter.type &&
@@ -501,13 +511,13 @@
   }
   function halloweenTargetAllowed(target) {
     var commitment = halloweenCommitment();
-    return !!commitment && !!target && target.type === "monster" && halloweenTargetTypes(commitment).indexOf(target.mtype) >= 0 &&
+    return !!commitment && commitment.phase === "attending" && !!target && target.type === "monster" && halloweenTargetTypes(commitment).indexOf(target.mtype) >= 0 &&
       target.visible !== false && !target.dead && target.hp > 0 && (!target.map || target.map === character.map) &&
       (target.mtype !== "jr" || character.map === commitment.encounter.map) &&
       (target.in == null || target.in === character.in) && halloweenMerchantSafe(target);
   }
   function halloweenTargetTypes(commitment) {
-    if (!commitment) return [];
+    if (!commitment || commitment.phase !== "attending") return [];
     return commitment.encounter.type === "mrpumpkin" ? ["jr", "mrpumpkin"] : [commitment.encounter.type];
   }
   function halloweenPriorityTarget() {
@@ -521,7 +531,7 @@
   function halloweenCombatEvent() {
     var commitment = halloweenCommitment();
     if (!commitment || !eventSelected("halloween") || !halloweenMerchantSafe()) return null;
-    return { name: "halloween", state: commitment.encounter, types: halloweenTargetTypes(commitment),
+    return { name: "halloween", state: commitment.encounter, types: halloweenTargetTypes(commitment), preparing: commitment.phase === "preparing",
       generation: commitment.generation, kind: "monster" };
   }
   var eventReturnPending = false;
@@ -10215,6 +10225,65 @@
     if (nearby && character.s && character.s.invis) await stop("invis");
   }
 
+  var eventDisableBusy = false;
+  function removePendingEventDisable(name) {
+    var index = pendingEventDisables.indexOf(name);
+    if (index >= 0) pendingEventDisables.splice(index, 1);
+  }
+  async function stopDisabledEventMovement(name) {
+    var revision = navigationIntent.revision, command = lastCommand, generation = runtimeGeneration;
+    function ownsStop() {
+      return runtimeCurrent() && runtimeGeneration === generation && navigationIntent.revision === revision &&
+        lastCommand === command && !eventSelected(name) && !joinedEvent &&
+        (!eventTraveling || travellingEventName === name) &&
+        !convoyTraveling && !forceTraveling && !townTraveling && !eventReturnPending;
+    }
+    if (!ownsStop() || typeof stop !== "function") return;
+    try { await stop("smart"); if (ownsStop()) await stop(); } catch (_eventDisableStop) {}
+  }
+  async function cancelDisabledEvent(name, disabledMerchantEvent) {
+    if (name === "anniversary") {
+      var oldKiss = root.__partyAnniversaryKissOperation;
+      var staging = root.__partyAnniversaryStagingOperation;
+      var owned = !!oldKiss || !!staging || anniversaryBusy || anniversaryStaging;
+      if (oldKiss) oldKiss.cancelled = true;
+      if (staging) staging.cancelled = true;
+      root.__partyAnniversaryKissOperation = null;
+      root.__partyAnniversaryStagingOperation = null;
+      anniversaryBusy = false; anniversaryStaging = false;
+      anniversaryMerchantFeaturedHold = false; anniversaryMerchantRetryAt = 0;
+      anniversaryStage = "anniversary disabled; resuming previous activity";
+      if (owned && !eventTraveling && !joinedEvent) await stopDisabledEventMovement(name);
+    } else if (name === joinedEvent || name === travellingEventName || name === disabledMerchantEvent) {
+      if (joinedEvent === name) {
+        eventTargetTypes = []; joinedEvent = null; root.__partyJoinedEvent = null;
+      }
+      await stopDisabledEventMovement(name);
+    }
+  }
+  async function reconcileDisabledEvents(disabledMerchantEvent) {
+    if (eventDisableBusy || !pendingEventDisables.length) return;
+    eventDisableBusy = true;
+    try {
+      for (var name of pendingEventDisables.slice()) {
+        if (!runtimeCurrent()) return;
+        if (eventSelected(name)) { removePendingEventDisable(name); continue; }
+        try {
+          await cancelDisabledEvent(name, disabledMerchantEvent);
+          if (!runtimeCurrent()) return;
+          if (eventSelected(name)) { removePendingEventDisable(name); continue; }
+          var result = await request("/event-disabled", { method: "POST", body: { character: character.name, event: name } });
+          if (name === "anniversary" && result.anniversary && !eventSelected(name)) anniversaryPlan = result.anniversary;
+          removePendingEventDisable(name);
+        } catch (error) {
+          // Retain this acknowledgement, but never block another heartbeat or
+          // the commands needed to complete the coordinator's current return.
+          recordStatusFailure(error, "event deselection: " + name);
+        }
+      }
+    } finally { eventDisableBusy = false; }
+  }
+
   async function tick() {
     observeBankSortVisit();
     if (busy) return;
@@ -10361,27 +10430,6 @@
         eventSelectionRevision++;
         pendingEventDisables = root.__partyPendingEventDisables = Array.from(new Set(pendingEventDisables.concat(previousSelections.filter(function(id) { return !eventSelected(id); }))));
       }
-      if (pendingEventDisables.length) {
-        for (var disabledEvent of pendingEventDisables.slice()) {
-          if (eventSelected(disabledEvent)) { pendingEventDisables.splice(pendingEventDisables.indexOf(disabledEvent), 1); continue; }
-          if (disabledEvent === "anniversary") {
-            var oldKiss = root.__partyAnniversaryKissOperation;
-            if (oldKiss) oldKiss.cancelled = true;
-            if (!convoyTraveling && !forceTraveling && !townTraveling) { try { await stop("smart"); await stop(); } catch (_eventDisableStop) {} }
-            anniversaryBusy = false; anniversaryStaging = false;
-            root.__partyAnniversaryKissOperation = null;
-            anniversaryMerchantFeaturedHold = false; anniversaryMerchantRetryAt = 0;
-            anniversaryStage = "anniversary disabled; resuming previous activity";
-            var disabledResult = await request("/event-disabled", { method: "POST", body: { character: character.name, event: disabledEvent } });
-            if (disabledResult.anniversary) anniversaryPlan = disabledResult.anniversary;
-          } else if (disabledEvent === joinedEvent || disabledEvent === partyEventHint || disabledEvent === travellingEventName || disabledEvent === disabledMerchantEvent) {
-            if (!convoyTraveling && !forceTraveling && !townTraveling) { try { await stop("smart"); await stop(); } catch (_disabledTravel) {} }
-            await request("/event-disabled", { method: "POST", body: { character: character.name, event: disabledEvent } });
-            eventTargetTypes = []; joinedEvent = null; root.__partyJoinedEvent = null;
-          }
-          pendingEventDisables.splice(pendingEventDisables.indexOf(disabledEvent), 1);
-        }
-      }
       if (followedBeforeRefresh && !followLeader && followingLeader && typeof stop === "function") {
         statusPhase = "stop leader follow";
         // A follow path is an asynchronous smart_move. Merely changing the flag
@@ -10485,6 +10533,11 @@
       catalogKnown = !state.needsCatalog;
       void prepareCatalog();
       flushStatusDiagnostics();
+      // Selection acknowledgements can wait for another return. Keep status,
+      // encounter authority and convoy command delivery live while they retry.
+      reconcileDisabledEvents(disabledMerchantEvent).catch(function(error) {
+        recordStatusFailure(error, "event deselection");
+      });
       statusPhase = "dispatch command";
       handle(state.command).catch(function (error) {
         if (state.command && lastCommand === Number(state.command.id) &&
@@ -10527,7 +10580,7 @@
       var value = raw[name];
       if (!value || typeof value !== "object") { corrected[name] = value; return; }
       corrected[name] = Object.assign({}, value);
-      ["next", "expires", "end"].forEach(function(key) {
+      ["next", "spawn", "expires", "end"].forEach(function(key) {
         if (value[key]) corrected[name][key] = anniversaryEpoch(value[key]) - eventClockOffset;
       });
     });
@@ -12200,7 +12253,14 @@
       }
       if (eventTraveling || banking || stocking || upgrading || departurePending || bankQueued) return;
       if (!await eventTravelAllowed(event.name)) return;
-      if (nearestEventTarget()) {
+      var visibleEventTarget = nearestEventTarget();
+      if (event.name === "halloween" && event.preparing && character.map === event.state.map &&
+          Math.hypot(character.x - event.state.x, character.y - event.state.y) <= 55) {
+        joinedEvent = root.__partyJoinedEvent = event.name;
+        root.__partyNavigationDetail = "Waiting for " + event.state.type + " to spawn";
+        return;
+      }
+      if (visibleEventTarget && (event.name !== "halloween" || is_in_range(visibleEventTarget))) {
         joinedEvent = event.name;
         root.__partyJoinedEvent = event.name;
         return;
@@ -12232,8 +12292,9 @@
           root.__partyEventRejoinRequired = null;
           game_log("Traveling to " + ((G.events[event.name] && G.events[event.name].name) || event.name), "#c084fc");
         }
-        if (event.kind !== "pvp" && !nearestEventTarget() && await eventTravelAllowed(event.name) && currentEventTravel())
-          await sharedPartyWalk(destination,"event",event.name,null,currentEventTravel);
+        if (event.kind !== "pvp" && await eventTravelAllowed(event.name) && currentEventTravel()) {
+          await walkCombatEvent(event, destination, currentEventTravel);
+        }
       } catch (error) {
         var reason = error && (error.reason || error.message || error);
         if (reason !== "interrupted" && reason !== "event_not_live")
@@ -12549,9 +12610,9 @@
       if (!current()) return { status: "cancelled" };
       if (!await eventTravelAllowed(event.name)) return { status: current() ? "retryable" : "cancelled", reason: "Waiting for event travel permission" };
       joinedEvent = event.name; root.__partyJoinedEvent = event.name; root.__partyEventRejoinRequired = null;
-      if (!eventRequiresJoin(event.name) && !nearestEventTarget()) {
+      if (!eventRequiresJoin(event.name)) {
         phase = "event-travel";
-        await sharedPartyWalk(destination, "event", event.name, null, current);
+        await walkCombatEvent(event, destination, current);
       }
       if (!current()) return { status: "cancelled" };
       game_log("Recovered " + event.name + " participation after respawning", "#c084fc");
@@ -13791,29 +13852,62 @@
   }
   async function independentHalloweenWalk(destination, current) {
     var revision = navigationIntent.revision, generation = runtimeGeneration;
-    var owner = { activity: "event", key: "halloween" }, done = false, failed = null;
+    var owner = { activity: "event", key: "halloween" }, route = null, direct = false;
     var deadline = Date.now() + 180000;
     root.__partySharedWalking = owner;
     try {
-      Promise.resolve(smart_move(destination)).then(function() { done = true; }, function(error) { failed = error; done = true; });
-      while (!done) {
+      while (true) {
         if (!runtimeCurrent() || runtimeGeneration !== generation || navigationIntent.revision !== revision ||
-            current && !current()) throw new Error("interrupted");
-        if (nearestEventTarget() || character.map === destination.map &&
-            Math.hypot(character.x - destination.x, character.y - destination.y) <= 55) return;
+            root.__partySharedWalking !== owner || current && !current()) throw new Error("interrupted");
         if (Date.now() > deadline) throw new Error("Halloween travel timed out");
+        // Shared arrival owns its route through the final acknowledgement.
+        // Local closing must wait for that owner before issuing another path.
+        if (convoyTraveling || partyConvoyActive) { await sleep(100); continue; }
+        var target = nearestEventTarget();
+        if (target && isAllowedTarget(target) && is_in_range(target)) return;
+        if (!target && character.map === destination.map &&
+            Math.hypot(character.x - destination.x, character.y - destination.y) <= 55) return;
+        var goal = target ? { map: character.map, x: target.x, y: target.y } : destination;
+        if (route && route.failed) throw route.failed;
+        // A path can finish at the closest walkable point outside melee range.
+        // Close the remaining terrain-clear gap before releasing combat.
+        var point = target && combatApproachPoint(target);
+        if (route && route.done && point && can_move_to(point.x, point.y)) {
+          direct = true;
+          // This segment belongs to event travel. Recording it as a combat
+          // move lets the paused role's idle reset stop it on the next tick.
+          root.__partyNavigationDetail = "Closing on " + target.mtype + " until in attack range";
+          if (!character.moving || Math.hypot(Number(character.going_x) - point.x, Number(character.going_y) - point.y) > 2)
+            (function(leg) { Promise.resolve(move(point.x, point.y)).catch(function(error) { leg.failed = error; }); })(route);
+        } else if (!route || route.done || route.goal.map !== goal.map ||
+            Math.hypot(route.goal.x - goal.x, route.goal.y - goal.y) > 35) {
+          if (route && !route.done) {
+            await stop("smart");
+            if (!runtimeCurrent() || runtimeGeneration !== generation || navigationIntent.revision !== revision ||
+                root.__partySharedWalking !== owner || current && !current()) throw new Error("interrupted");
+          }
+          route = { goal: goal, done: false, failed: null };
+          (function(leg) {
+            Promise.resolve(smart_move(leg.goal)).then(function() { leg.done = true; }, function(error) { leg.failed = error; leg.done = true; });
+          })(route);
+        }
         await new Promise(function(resolve) { setTimeout(resolve, 250); });
       }
-      if (failed) throw failed;
     } finally {
       if (root.__partySharedWalking === owner) {
         root.__partySharedWalking = null;
         // A newer manual command owns its own movement and must survive cleanup.
-        if (!done && runtimeCurrent() && runtimeGeneration === generation && navigationIntent.revision === revision) {
+        if ((route && !route.done || direct && character.moving) && runtimeCurrent() && runtimeGeneration === generation && navigationIntent.revision === revision) {
           try { await stop("smart"); await stop("move"); } catch (_halloweenWalkStop) {}
         }
       }
     }
+  }
+  async function walkCombatEvent(event, destination, current) {
+    if (!nearestEventTarget()) await sharedPartyWalk(destination, "event", event.name, null, current);
+    var target = nearestEventTarget();
+    if (event.name === "halloween" && current() && target && !is_in_range(target))
+      await independentHalloweenWalk(destination, current);
   }
   async function sharedPartyWalk(destination, activity, key, parentCommand, current) {
     if(character.name!==leader && !followLeader)
@@ -13839,7 +13933,9 @@
           // Join/teleport can finish before the boss entity arrives. Yield the
           // walking owner as soon as combat can acquire it, even while waiting
           // for the rest of the party or a coordinator route.
-          if(nearestEventTarget())return;
+          // Halloween visibility is not arrival. Cancelling this shared leg
+          // here also strands party members whose weapons have shorter range.
+          if(key !== "halloween" && nearestEventTarget())return;
         }
         if(Date.now()>deadline)throw new Error("Shared walking rendezvous timed out");
         var result;

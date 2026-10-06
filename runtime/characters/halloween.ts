@@ -1,2 +1,3 @@
-import { observeHalloween, readHalloweenAttendance } from '../events/halloween.ts';
-Object.assign(globalThis, { partyHalloweenEvents: { observe: observeHalloween, readAttendance: readHalloweenAttendance } });
+import { observeHalloween, readHalloweenAttendance, halloweenPreparation } from '../events/halloween.ts';
+Object.assign(globalThis, { partyHalloweenEvents: { observe: observeHalloween,
+  readAttendance: readHalloweenAttendance, preparation: halloweenPreparation } });

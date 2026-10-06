@@ -6,15 +6,26 @@ export type HalloweenBoss = (typeof halloweenBosses)[number];
 // validated observation envelope, not a complete upstream monster object.
 export type HalloweenEncounter = Omit<Pick<SMonsterEventLiveWithCoordinates,
   'map' | 'x' | 'y' | 'hp' | 'max_hp' | 'target'>, 'map'> & { map: string; type: HalloweenBoss };
+export type HalloweenSpawn = Pick<HalloweenEncounter, 'type' | 'map' | 'x' | 'y'> & { spawnAt: number };
+export const halloweenPreparationMs = 60000;
+export const halloweenSpawnGraceMs = 30000;
+/** Clock-offset estimates fluctuate between heartbeats without rescheduling a spawn. */
+export function sameHalloweenSpawn(first: HalloweenSpawn, second: HalloweenSpawn): boolean {
+  return first.type === second.type && first.map === second.map &&
+    Math.abs(first.spawnAt - second.spawnAt) <= 1000 && Math.hypot(first.x - second.x, first.y - second.y) <= 1;
+}
 export interface HalloweenObservation {
   season: boolean;
   feedAt: number;
   bosses: HalloweenEncounter[];
   next?: number;
+  // Older character reports contain only the earliest timestamp.
+  upcoming?: HalloweenSpawn[];
 }
 interface AttendanceOwner { source: string; realm: string; generation: number }
 export type HalloweenAttendance = AttendanceOwner & (
   { phase: 'idle' | 'waiting' } |
+  { phase: 'preparing'; encounter: HalloweenSpawn } |
   { phase: 'attending'; encounter: HalloweenEncounter; lastLiveAt: number }
 );
 export type HalloweenAttendanceReport = HalloweenAttendance & { validUntil: number };
@@ -28,6 +39,10 @@ export function readHalloweenAttendance(value: unknown): HalloweenAttendanceRepo
   const entry = object(value), owner = readOwner(value);
   if (!entry || !owner) return null;
   if (entry.phase === 'idle' || entry.phase === 'waiting') return { ...owner, phase: entry.phase };
+  if (entry.phase === 'preparing') {
+    const encounter = readHalloweenSpawn(entry.encounter);
+    return encounter ? {...owner, phase: 'preparing', encounter} : null;
+  }
   const encounter = readHalloweenEncounter(entry.encounter);
   return entry.phase === 'attending' && encounter && finite(entry.lastLiveAt)
     ? { ...owner, phase: 'attending', encounter, lastLiveAt: entry.lastLiveAt } : null;
@@ -57,6 +72,11 @@ export function readHalloweenEncounter(value: unknown): HalloweenEncounter | nul
   if (!point || !health) return null;
   return { type: entry.type, ...point, ...health, target: typeof entry.target === 'string' ? entry.target : null };
 }
+function readHalloweenSpawn(value: unknown): HalloweenSpawn | null {
+  const entry = object(value), point = entry && readPoint(entry);
+  return entry && point && isHalloweenBoss(entry.type) && finite(entry.spawnAt) && entry.spawnAt > 0
+    ? {...point, type: entry.type, spawnAt: entry.spawnAt} : null;
+}
 function readPoint(entry: Record<string, unknown>) {
   if (typeof entry.map !== 'string' || !entry.map || !finite(entry.x) || !finite(entry.y)) return null;
   return { map: entry.map, x: entry.x, y: entry.y };
@@ -70,7 +90,9 @@ export function readHalloweenObservation(value: unknown): HalloweenObservation |
   if (!entry || typeof entry.season !== 'boolean' || !finite(entry.feedAt) || !Array.isArray(entry.bosses)) return null;
   const bosses = entry.bosses.slice(0, 2).map(readHalloweenEncounter)
     .filter((boss): boss is HalloweenEncounter => boss !== null);
-  return { season: entry.season, feedAt: entry.feedAt, bosses,
+  const upcoming = Array.isArray(entry.upcoming) ? entry.upcoming.slice(0, 2).map(readHalloweenSpawn)
+    .filter((spawn): spawn is HalloweenSpawn => spawn !== null) : [];
+  return { season: entry.season, feedAt: entry.feedAt, bosses, upcoming,
     ...(finite(entry.next) && entry.next > 0 ? { next: entry.next } : {}) };
 }
 function timestamp(value: unknown): number | undefined {
@@ -89,7 +111,7 @@ function spawnPoint(maps: Record<string, unknown>, type: HalloweenBoss) {
   return null;
 }
 function spawnCenter(value: unknown, type: HalloweenBoss) {
-  const spawn = object(value), bounds = spawn?.boundary;
+  const spawn = object(value), bounds = spawn?.boundary || (spawn && Array.isArray(spawn.boundaries) ? spawn.boundaries[0] : null);
   if (spawn?.type !== type || !Array.isArray(bounds)) return null;
   const offset = typeof bounds[0] === 'string' ? 1 : 0;
   const [left, top, right, bottom] = bounds.slice(offset, offset + 4);
@@ -111,18 +133,30 @@ export function observeHalloween(status: unknown, game: unknown, feedAt: number)
   const feed = object(status) || {}, data = object(game) || {};
   const maps = object(data.maps) || {}, monsters = object(data.monsters) || {};
   const bosses: HalloweenEncounter[] = [];
+  const upcoming: HalloweenSpawn[] = [];
   let next: number | undefined;
   for (const type of halloweenBosses) {
     const boss = object(feed[type]);
     if (!boss) continue;
     if (boss.live !== true) {
-      next = earlier(next, timestamp(boss.spawn || boss.next));
+      const spawnAt = timestamp(boss.spawn || boss.next);
+      next = earlier(next, spawnAt);
+      const reported = readPoint(boss);
+      const point = spawnPoint(maps, type) || (reported && maps[reported.map] ? reported : null);
+      if (spawnAt && point) upcoming.push({...point, type, spawnAt});
       continue;
     }
     const encounter = liveBoss(type, boss, maps, monsters);
     if (encounter) bosses.push(encounter);
   }
-  return { season: feed.halloween === true, feedAt, bosses, next };
+  return { season: feed.halloween === true, feedAt, bosses, next, upcoming };
+}
+/** Keep preparation owned briefly past its deadline while the live report arrives. */
+export function halloweenPreparation(observation: HalloweenObservation | null | undefined, now: number): HalloweenSpawn | null {
+  if (!observation || now - observation.feedAt > 120000 || observation.feedAt > now + 5000) return null;
+  return (observation.upcoming || []).filter(spawn => spawn.spawnAt - now <= halloweenPreparationMs &&
+    now <= spawn.spawnAt + halloweenSpawnGraceMs)
+    .sort((a, b) => a.spawnAt - b.spawnAt || a.type.localeCompare(b.type))[0] || null;
 }
 export function rankHalloweenBosses(bosses: readonly HalloweenEncounter[]): HalloweenEncounter[] {
   return [...bosses].sort((a, b) => a.hp / a.max_hp - b.hp / b.max_hp || a.type.localeCompare(b.type));

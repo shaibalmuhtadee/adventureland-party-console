@@ -1,7 +1,7 @@
 import { characterRuntime, distance, type RoutePoint, type SharedConvoy, type SharedState } from "./shared-route-types.ts";
 import { readRoutePoint } from "./shared-route-store.ts";
 import { eventPolicy } from '../../../dashboard/lib/event-policy.ts';
-import type { HalloweenAttendance } from '../../events/halloween.ts';
+import { halloweenPreparation, sameHalloweenSpawn, type HalloweenAttendance } from '../../events/halloween.ts';
 
 interface WalkRequest {
   name: string; token: string; runtimeId: string; revision: number; at: number;
@@ -86,8 +86,12 @@ export function createSharedWalks(input: unknown, ports: WalkPorts) {
   function halloweenCurrent(r: WalkRequest): boolean {
     const source = eventPolicy(state, r.name).source, realm = state.statuses[r.name]?.server;
     const commitment = state.halloweenAttendance?.[JSON.stringify([source, realm])];
-    return !!commitment && commitment.phase === 'attending' && commitment.generation === r.halloweenGeneration &&
-      commitment.lastLiveAt >= ports.now() - 10000 && distance(commitment.encounter, r.destination) <= 1;
+    if (!commitment || commitment.phase === 'idle' || commitment.phase === 'waiting' ||
+        commitment.generation !== r.halloweenGeneration || distance(commitment.encounter, r.destination) > 1) return false;
+    if (commitment.phase === 'attending') return commitment.lastLiveAt >= ports.now() - 10000;
+    const reporter = state.statuses[source];
+    const upcoming = halloweenPreparation(reporter?.halloweenObservation, ports.now());
+    return !!upcoming && Number(reporter?.seenAt) >= ports.now() - 10000 && sameHalloweenSpawn(upcoming, commitment.encounter);
   }
   function rareOwnsRecovery(r: WalkRequest): boolean {
     return r.activity === 'farm-recovery' && !recoveryContinuation(r) &&
