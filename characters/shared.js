@@ -376,6 +376,28 @@
   var convoyTraveling = null;
   var convoySignal = null;
   var convoyRuntimeId = Date.now() + "-" + Math.random().toString(36).slice(2);
+  var partyMetrics = root.installPartyMetrics({
+    now: function () { return Date.now() + coordinatorClockOffset; },
+    current: runtimeCurrent,
+    connected: function () { return !!character && (!parent.socket || parent.socket.connected !== false); },
+    name: function () { return character.name; },
+    own: ownActor,
+    context: function () { return {
+      server: String(parent.server_region || '') + String(parent.server_identifier || '') || 'unknown',
+      map: character.map, instance: String(character.in || character.map), party: currentPartyList()
+    }; },
+    sample: function () {
+      var encouragementLuck = root.partyMetricsEncouragementLuck(character.encouragement, character.s);
+      return {
+        gold: Number(character.gold) || 0, luck: Number(character.luckm) || 1,
+        encouragementLuck: encouragementLuck === null ? undefined : encouragementLuck,
+        ping: typeof character.ping === 'number' && isFinite(character.ping) && character.ping >= 0 ? character.ping : null,
+        level: Number(character.level) || 1, xp: Number(character.xp) || 0, maxXp: Number(character.max_xp) || 0
+      };
+    },
+    storage: root.localStorage,
+    send: function (body) { return request('/metrics', { method: 'POST', body: body, timeout: 5000 }); }
+  });
   var dashboardSampler = root.createPartyDashboardSampler && root.createPartyDashboardSampler({
     now: function () { return Date.now() + coordinatorClockOffset; }, current: runtimeCurrent,
     name: function () { return character.name; }, runtime: function () { return convoyRuntimeId; },
@@ -930,6 +952,7 @@
     }
   }
   var combatHitListener = function (data) {
+    if (data) partyMetrics.hit(data, get_entity(data.id) || groupedCombat && groupedCombat.target && groupedCombat.target.id === String(data.id) && groupedCombat.target);
     escapeObserveHit(data);
     defendPartyHit(data);
     if(data && (data.kill || data.dead) && root.partyLootClient && currentPartyList().indexOf(String(data.hid||data.actor||''))>=0) {
@@ -1036,6 +1059,7 @@
   };
   var combatKillCreditListener = function (data) {
     if (!data || !data.mtype) return;
+    partyMetrics.credit(data);
     observeFightPacket("kill_credit",data);
     var now = Date.now();
     recentOwnKills = recentOwnKills.filter(function (kill) { return now - kill.at < 3000; });
@@ -1089,6 +1113,7 @@
   };
   var dungeonOpenedChests = root.__partyDungeonOpenedChests = root.__partyDungeonOpenedChests || {run:null, ids:{}};
   var combatLootListener = function (data) {
+    if (data && Array.isArray(data.items)) partyMetrics.loot(data);
     if (data && data.cave && character.cave) {
       if (dungeonOpenedChests.run !== character.cave.run) dungeonOpenedChests = root.__partyDungeonOpenedChests = {run:character.cave.run, ids:{}};
       dungeonOpenedChests.ids[data.id] = true;

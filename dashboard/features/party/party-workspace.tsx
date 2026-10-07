@@ -76,6 +76,18 @@ export function PartyWorkspace({ model }: { model: PartyConsoleModel }) {
             <EscapeControl />
           </RadioGroup>
         )}
+        </div>
+      </section>
+    </>
+  );
+}
+
+/** Dialogs stay outside the translating/clipped workspace. */
+export function PartyWorkspacePanels({ model }: { model: PartyConsoleModel }) {
+  const { state, monsters, post, setMonsterNavigateTarget, huntSetup, huntSetupCharacter, monsterNavigateBusy,
+    setHuntSetup, setMonsterNavigateBusy, monsterNavigateTarget, farmAreaRequest, setFarmAreaRequest, startFarmingArea, wtbItem } = model;
+  return (
+    <>
         <PartyItemDetails model={model} />
         {huntSetup !== null && (
           <FarmingAreaPicker
@@ -150,8 +162,6 @@ export function PartyWorkspace({ model }: { model: PartyConsoleModel }) {
         <PartyCreateCharacter model={model} />
         <PartyMerchantCommerceDialog model={model} />
         <PartySendMailDialog model={model} />
-        </div>
-      </section>
     </>
   );
 }

@@ -15,6 +15,7 @@ import { loadCoordinatorGeometry } from './navigation/planner-geometry.ts';
 import { initializeStandLocation, standLocationRoute } from './merchant/stand-location.ts';
 import { createRareRouteDistance } from './navigation/rare-route-distance.ts';
 import { createPontyShopping } from './merchant/ponty-shopping.ts';
+import { createMetricsService } from './metrics/service.ts';
 export function startCoordinatorApplication(
   platform: CoordinatorApplicationPlatform,
 ): Promise<void> {
@@ -151,6 +152,23 @@ export function startCoordinatorApplication(
         for (const name of names) delete party.commands[name];
       },
     });
+    const metrics = (() => {
+      try {
+        return createMetricsService(LOCALSTORAGE_PATH + '.metrics.jsonl', {
+          owned: name => !!ownedCharacter(name), now: Date.now,
+          warn: error => log.warn({ error }, 'Metrics retention failed'),
+        });
+      } catch (error) {
+        // A metrics disk/startup failure must not stop character coordination.
+        // Preserve the original history and expose an unavailable endpoint.
+        log.warn({ error }, 'Metrics storage unavailable; party coordination continues');
+        return { close() {}, install(router: HttpRouter) {
+          const unavailable: HttpHandler = (_request, response) => response.status(503).json({ error: 'Metrics storage unavailable' });
+          router.get('/party-api/metrics', unavailable); router.post('/party-api/metrics', unavailable);
+          router.post('/party-api/metrics/reset', unavailable);
+        } };
+      }
+    })();
     migrateSharedRules(party, Object.keys(character_manage).filter(name => !party.bankbois[name]));
     const farmingScopes = coordinatorPolicies.createFarmingScopes(party);
     const soloServices = new Map<string, ReturnType<typeof createSoloServices>>();
@@ -300,7 +318,7 @@ export function startCoordinatorApplication(
     const shutdownCoordinator = coordinatorPolicies.createShutdown({
       log: (message) => console.log(message),
       stopCharacters: () => characterManager.stopAll(),
-      closeStorage: () => { movementPlanner.dispose(); localStorage.close(); },
+      closeStorage: () => { movementPlanner.dispose(); metrics.close(); localStorage.close(); },
       exit: () => process.exit(),
     });
     const pontyShopping = createPontyShopping(party, {
@@ -2217,7 +2235,7 @@ export function startCoordinatorApplication(
                 });
               },
               liveTelemetry: (router) => dashboardStream.install(router),
-              combatLogs: (router) => combatLogRoutes.install(router),
+              combatLogs: (router) => { combatLogRoutes.install(router); metrics.install(router); },
               roster: (express_inst) => {
                 const ownership = coordinatorPolicies.coordinatorOwnership(party);
                 installRosterRoutes(

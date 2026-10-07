@@ -1,0 +1,59 @@
+/** Metrics wire contracts. These are aggregated observations, not complete game objects. */
+export interface MetricContext { character: string; server: string }
+export interface MetricDamage { monster: string; skill: string; amount: number; hits: number }
+export interface MetricCredit { monster: string; count: number }
+export interface MetricKill { id: string; at: number; monster: string; actor: string }
+export interface MetricLoot { id: string; at: number; item: string; variant: string; quantity: number }
+export interface MetricSample {
+  at: number; gold: number; luck: number; ping: number | null; level: number; xp: number; maxXp: number;
+  /** Native Encouragement totals, separate from ordinary luckm. Older history omits this field. */
+  encouragementLuck?: number;
+}
+export interface MetricFrame {
+  at: number;
+  sequence: number;
+  observedMs: number;
+  partial: boolean;
+  damage: MetricDamage[];
+  credits: MetricCredit[];
+  kills: MetricKill[];
+  loot: MetricLoot[];
+  first: MetricSample;
+  last: MetricSample;
+}
+export interface MetricBatch extends MetricContext { runtime: string; frames: MetricFrame[] }
+export interface MetricTotals extends MetricContext {
+  /** Independent gold baseline when other measurements survive a gold reset. */
+  goldStart?: Pick<MetricSample, 'at' | 'gold'>;
+  observedMs: number;
+  partial: boolean;
+  damage: MetricDamage[];
+  credits: MetricCredit[];
+  loot: { item: string; variant: string; quantity: number }[];
+  first: MetricSample;
+  last: MetricSample;
+  samples: number;
+  luckSum: number;
+  pingSum: number;
+  pingSamples: number;
+}
+export interface MetricDeathTotal { server: string; monster: string; actor: string; count: number }
+/** Death attribution is independent of the character that observed the packet. */
+export interface MetricPoint { at: number; values: MetricTotals[]; kills: MetricDeathTotal[] }
+export interface MetricsResponse {
+  version: 1;
+  startedAt: number;
+  from: number;
+  to: number;
+  resolutionMs: number;
+  points: MetricPoint[];
+  characters: string[];
+  servers: string[];
+  lastReceivedAt: number | null;
+  incomplete: boolean;
+  resets?: MetricResets;
+}
+export const METRIC_RESET_KINDS = ['kills', 'damage', 'gold', 'loot', 'ping'] as const;
+export type MetricResetKind = typeof METRIC_RESET_KINDS[number];
+export type MetricResets = Partial<Record<MetricResetKind, number>>;
+export const METRIC_BUCKET_MS = 10_000;

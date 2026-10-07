@@ -351,6 +351,14 @@ activate with the coordinator-only restart.
 
 ## Dashboard render and polling performance
 
+Party Console Metrics uses a dedicated JSONL history store and versioned native
+collector, independent of combat-log retention. See [metrics](../../docs/metrics.md)
+for counting rules, graph controls, drop assumptions, retention, and source
+ownership. This changes character, coordinator, and dashboard assets and requires
+the ordinary full restart workflow when the user activates it. Run
+`npm run typecheck` after implementation changes; gameplay verification and
+activation remain with the user unless requested.
+
 Dashboard `core` reads retain live Hunt, convoy, anniversary, slot, and client-update
 progress. The separate `config` section carries settings, rules and marks, polled
 every fifteen seconds and invalidated immediately after dashboard mutations.

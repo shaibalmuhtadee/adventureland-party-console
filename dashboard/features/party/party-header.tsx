@@ -2,6 +2,7 @@
 import { Button } from "@/components/ui/button";
 import {
   BookOpen,
+  ChartNoAxesCombined,
   Landmark,
   Mail,
   PackageOpen,
@@ -17,7 +18,7 @@ import { ConsoleUpdateIndicator, useUpdates } from './console-updates';
 
 function ListCode({className}:{className:string}) { return <svg className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true"><path d="M3 4h18M3 8h18M3 12h7M7 16l-4 3 4 3m10-6 4 3-4 3m-3-7-3 8" /></svg>; }
 
-export function PartyHeader({ model, onLogs }: { model: PartyConsoleModel; onLogs: () => void }) {
+export function PartyHeader({ model, onLogs, metricsActive, onMetrics }: { model: PartyConsoleModel; onLogs: () => void; metricsActive: boolean; onMetrics: () => void }) {
   const { state: updates } = useUpdates();
   const {
     state,
@@ -40,7 +41,11 @@ export function PartyHeader({ model, onLogs }: { model: PartyConsoleModel; onLog
           <div className="relative"><div className="flex items-center"><h1 className="text-3xl font-semibold">Party Console</h1><ConsoleUpdateIndicator open={() => setSettingsOpen(true)} /></div>
             <span className="mt-1 block font-mono text-[10px] leading-3 text-emerald-100/70">{state.gameVersion ? `Game v${state.gameVersion} · ` : ''}Console {updates ? `v${updates.displayVersion || updates.current}` : 'loading…'}</span>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
+            <Button variant="outline" onClick={onMetrics} aria-pressed={metricsActive} aria-controls="party-metrics-view"
+              className={metricsActive ? 'border-cyan-300 bg-cyan-950 text-cyan-100 hover:bg-cyan-900 hover:text-white' : 'border-cyan-700 bg-[#10201f] text-cyan-200 hover:bg-cyan-950 hover:text-white'}>
+              <ChartNoAxesCombined className="mr-2 h-4 w-4" />Metrics
+            </Button>
             <Button
               variant="outline"
               onClick={() => setMailOpen(true)}
