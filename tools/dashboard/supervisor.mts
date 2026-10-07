@@ -47,7 +47,10 @@ async function productionBuild(): Promise<string> {
     await readFile(path.join(output, "server/index.js"));
     return output;
   }
-  const generation = await fingerprint(root);
+  // Dashboard components import maintained runtime helpers outside their root.
+  // Include those sources and the build pipeline so shared fixes cannot reuse
+  // a completed release containing the previous implementation.
+  const generation = await fingerprint(root, ['../runtime', '../tools/dashboard']);
   await pin(generation);
   const output = path.join(root, ".build/releases", generation);
   try {

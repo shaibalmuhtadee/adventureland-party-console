@@ -11,6 +11,8 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
+  itemSwapSettings?(): import('../../item-swaps.ts').ItemSwap[];
+  itemSwapMutationBlocked?(): boolean;
   rogueKnifeFarm?(): { map: string; x: number; y: number } | null;
   rogueKnifeFarmMove?(point?: { map: string; x: number; y: number }): boolean;
   rogueKnifeFarmContains?(point: { map: string; x: number; y: number }): boolean;
@@ -106,6 +108,7 @@ export interface SharedCombat {
   smartLoot(): Promise<unknown>;
 }
 export interface CombatState {
+  itemSwap?: import('./item-swap-controller.ts').SwapDiagnostic;
   crabFarm?: import('../farming/rogue-knives.ts').RogueKnifePositionDiagnostic | null;
   skill?: import('../skills/types.ts').SkillDiagnostic;
   entityRefresh?: import('../../combat/entity-refresh.ts').EntityRefreshDiagnostic;
@@ -133,6 +136,7 @@ export interface RoleRunner {
   stop(): void;
 }
 export interface CombatRoot {
+  partyItemSwaps?: import('./item-swaps-runtime.ts').ItemSwapRuntime;
   partyPorcupineEquipment?: ReturnType<typeof import("./porcupine-equipment.ts").createPorcupineEquipment>;
   sharedRoutine: SharedCombat;
   partyRoleRunner?: RoleRunner;

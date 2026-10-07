@@ -5,6 +5,7 @@ export function diagnosticCharacters(statuses: Readonly<Record<string, Presentat
   const allowed = new Set([
     "name",
     "recovery",
+    "itemSwap",
     "movement",
     "eventWalkFailure",
     "farmingNavigationDebug",

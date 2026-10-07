@@ -14,6 +14,7 @@ import { SkillClass } from "./skill-class";
 import { Sprite } from "./sprite";
 
 export type Char = {
+  itemSwap?: import('../../../runtime/characters/roles/item-swap-controller').SwapDiagnostic | null;
   luckySlotTracking?: LuckySlotTracking;
   tracktrix?: { active: boolean; bonuses: Record<string, number> | null; sprite?: Sprite | null };
   lootStatus?: {at:number;map:string;eligible:number;pending:boolean;error?:string|null};

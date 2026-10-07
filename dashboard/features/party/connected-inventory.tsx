@@ -3,6 +3,7 @@ import { UpgradeOfferingProvider } from './upgrade-offering-controls';
 import { SharedRuleConflicts } from './shared-rule-conflicts';
 import { automaticCommerceRuleKey } from './automatic-commerce-rule-key';
 import { InventoryPanel } from './inventory-panel';
+import { InventorySwaps } from './inventory-swaps';
 import { aggregateSlotTracking } from '../../../runtime/lucky-slot-tracking';
 import { LuckySlotDialog } from './lucky-slot-tracker';
 import { same } from './same';
@@ -22,7 +23,7 @@ export const ConnectedInventory = memo(function ConnectedInventory({
   name: string;
   model: InventoryModel;
 }) {
-  const model = usePanelModel(base, { inventory: true });
+  const model = usePanelModel(base, { inventory: true, diagnostics: true });
   const {
     state,
     chars,
@@ -227,6 +228,8 @@ export const ConnectedInventory = memo(function ConnectedInventory({
     />
     <LuckySlotDialog character={name} tracking={luckyTracking} verified={state.luckyUpgradeSlots?.[name]} open={luckySlotOpen} onOpenChange={setLuckySlotOpen} />
     {char.name === state.merchantCharacter && <SharedRuleConflicts state={state} onResolve={(id, owner) => post("/merchant/rule-conflict", {id,owner})} />}
+    <InventorySwaps character={char} swaps={state.itemSwaps?.[name] || emptyArray()}
+      onSave={async swaps => { await post('/item-swaps', { character: name, swaps }); }} />
     <DeconstructionConfirmation selection={deconstructionSelection} catalog={state.deconstructionCatalog || emptyRecord()}
       items={state.merchantCatalog?.allItems || emptyArray()} onClose={() => setDeconstructionSelection(null)}
       onConfirm={async ({ entry, auto }) => {

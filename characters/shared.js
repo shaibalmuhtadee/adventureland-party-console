@@ -586,6 +586,7 @@
   if (root.__partyEventTimer) clearInterval(root.__partyEventTimer);
   root.__partyEventTimer = null;
   var partyPositions = [];
+  var itemSwapSettings = [];
   var bankStackHomes = {};
   var reunion = root.__partyReunion || null, reunionWorking = false;
   var reunionMageOffer = null;
@@ -2637,6 +2638,7 @@
       activeCombatTarget: activeCombatTarget(),
       combatTrace: root.__partyCombatTrace || [],
       recovery: root.partyCombatState && root.partyCombatState.recovery || null,
+      itemSwap: root.partyCombatState && root.partyCombatState.itemSwap || null,
       eventWalkFailure: root.__partyEventWalkFailure || null,
       lastCommandId: lastCommand,
       merchantCommand: root.__merchantCommandReport || null,
@@ -3673,6 +3675,7 @@
     if (result.deferred) activity.push({ level: "info", message: "Bank stack cleanup deferred: inventory buffers unavailable" });
   }
   async function bankStoreFully(slot) {
+    if (itemSwapReserved(character.items[slot])) throw new Error("Item reserved for inventory swaps");
     var attempts = 0;
     while (character.items[slot] && attempts < 50) {
       var inventorySize = Number(character.isize) || character.items.length;
@@ -5086,7 +5089,20 @@
   }
 
   function cleanoutProtected(item) {
-    return item.l || item.b || ["tracker", "supercomputer", "hpot0", "mpot0", "hpot1", "mpot1"].indexOf(item.name) >= 0;
+    return itemSwapReserved(item) || item.l || item.b || ["tracker", "supercomputer", "hpot0", "mpot0", "hpot1", "mpot1"].indexOf(item.name) >= 0;
+  }
+
+  function itemSwapReserved(item) {
+    return !!item && (itemSwapSettings.some(function (swap) {
+      return swap.items.some(function (selection) {
+        var wanted = selection.item;
+        return item.name === wanted.name && (item.level || 0) === (wanted.level || 0) &&
+          (item.p == null ? undefined : item.p) === (wanted.p == null ? undefined : wanted.p) &&
+          (item.stat_type == null ? undefined : item.stat_type) === (wanted.stat_type == null ? undefined : wanted.stat_type) &&
+          (item.rid == null ? undefined : item.rid) === (wanted.rid == null ? undefined : wanted.rid) &&
+          JSON.stringify(item.data) === JSON.stringify(wanted.data);
+      });
+    }) || root.partyItemSwaps && root.partyItemSwaps.reserved(item));
   }
 
   function isPersonalTracker(item) {
@@ -5310,7 +5326,7 @@
         await refreshCompoundProtection(command);
         if (!compoundAvailableStock(command)[slot]) continue;
       }
-      if (isPersonalTracker(character.items[slot]) || command.cleanout && cleanoutProtected(character.items[slot])) continue;
+      if (itemSwapReserved(character.items[slot]) || isPersonalTracker(character.items[slot]) || command.cleanout && cleanoutProtected(character.items[slot])) continue;
       var sendQuantity = Math.min(Number(requests[i].quantity) || itemQuantity(character.items[slot]),
         itemQuantity(character.items[slot]));
       if (requests[i].mark && (requests[i].mark.deconstructionId || requests[i].mark.npcSaleId) && (character.items[slot].l || character.items[slot].b)) continue;
@@ -5437,7 +5453,7 @@
       })) || (command.merchantWithdrawals || []).some(function (work) {
         return work.improvement && sameItem(bankingItem, work.item);
       });
-      if (improvementReserved) continue;
+      if (improvementReserved || itemSwapReserved(bankingItem)) continue;
       var slot = findMarkedItem(mark);
       if (slot < 0) {
         // The persistent auto-mark policy lives separately; this concrete slot
@@ -8465,6 +8481,7 @@
           activity.push({ level: "error", message: "NPC-sale item changed before sale: " + mark.item.name });
           continue;
         }
+        if (itemSwapReserved(character.items[inventorySlot])) { blocked.push({id:mark.id,error:"Item reserved for inventory swaps"}); continue; }
         if (character.items[inventorySlot].l) { blocked.push({id:mark.id,error:"Item is locked"}); continue; }
         var quantity = Math.min(Number(mark.quantity) || 1, Number(character.items[inventorySlot].q) || 1);
         // Named NPC destinations include the walkable interaction offset.
@@ -9536,7 +9553,14 @@
   async function handle(command) {
     if (root.__partyTracktrixMove) await root.__partyTracktrixMove;
     root.__partyInventoryCommands = (root.__partyInventoryCommands || 0) + 1;
-    try { return await handleOwnedCommand(command); }
+    try {
+      if (root.partyItemSwaps) {
+        if (command && ["equip", "unequip", "equip-deliveries"].indexOf(command.type) >= 0)
+          await root.partyItemSwaps.manual();
+        else await root.partyItemSwaps.restoreForActivity();
+      }
+      return await handleOwnedCommand(command);
+    }
     finally { root.__partyInventoryCommands -= 1; }
   }
 
@@ -10065,11 +10089,13 @@
     if (command.type === "equip") {
       if (!isDashboardEquipment(command.item)) throw new Error("item is not equipment; use its explicit Use action instead");
       if (root.partyPorcupineEquipment) await root.partyPorcupineEquipment.manual();
+      if (root.partyItemSwaps) await root.partyItemSwaps.manual();
       if (character.ctype === "merchant") await closeMerchantStandForTravel();
       var slot = findItem(command.item);
       if (slot >= 0) await equip(slot);
     }
     if (command.type === "equip-deliveries") {
+      if (root.partyItemSwaps) await root.partyItemSwaps.manual();
       var equipResults = await equipDeliveredItems(command.items || []);
       equipResults.forEach(function(result, index) { if (command.deliveryIds) result.deliveryId = command.deliveryIds[index]; });
       await request("/equip-delivery-complete", { method: "POST", body: {
@@ -10078,6 +10104,7 @@
     }
     if (command.type === "unequip") {
       if (root.partyPorcupineEquipment) await root.partyPorcupineEquipment.manual();
+      if (root.partyItemSwaps) await root.partyItemSwaps.manual();
       if (character.ctype === "merchant") await closeMerchantStandForTravel();
       if (typeof command.slot !== "string" || !sameItem(character.slots[command.slot], command.item))
         throw new Error("equipped item no longer matches that slot");
@@ -10491,6 +10518,7 @@
       if (state.merchantStandLocation && state.merchantStandLocation.map === "main" &&
           Number.isFinite(state.merchantStandLocation.x) && Number.isFinite(state.merchantStandLocation.y))
         merchantMarketLocation = {map:"main",x:state.merchantStandLocation.x,y:state.merchantStandLocation.y};
+      itemSwapSettings = state.itemSwaps && state.itemSwaps[character.name] || [];
       merchantCashTarget = Math.max(0, Number(state.merchantGoldTarget) || 0);
       if (character.ctype === "merchant" && !root.__merchantActiveJob && !gatheringActive &&
           !(merchantWeapon && merchantWeapon.item) && character.slots && character.slots.mainhand &&
@@ -13680,6 +13708,7 @@
       }
       combatTargetId = null;
       if (navigationOwner && navigationOwner.cancelled) return;
+      if (root.partyItemSwaps) await root.partyItemSwaps.restoreForActivity();
       return await action();
     } finally {
       departurePending = false;
@@ -16553,6 +16582,11 @@
       if (groupedFarming() && groupedCombat && groupedCombat.protocol === 4) return groupedCombat.target || null;
       var target = combatTargetId && get_entity(combatTargetId);
       return target && target.visible && !target.dead ? target : null;
+    },
+    itemSwapSettings: function () { return itemSwapSettings; },
+    itemSwapMutationBlocked: function () {
+      return !!(root.__partyInventoryCommands && !departurePending || root.__partyTracktrixMove || banking ||
+        bankQueued || stocking || upgrading || gatheringActive || root.__merchantActiveJob);
     },
     setCombatTarget: function (target) {
       publishCombatSelection(target, false);

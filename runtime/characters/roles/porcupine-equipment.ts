@@ -133,6 +133,7 @@ export function createPorcupineEquipment(ports: WeaponPorts, memory: WeaponMemor
       await memory.pending;
     },
     busy: () => !!memory.pending,
+    ownsHands: () => !!memory.session,
     stop() { active = false; },
   };
 }

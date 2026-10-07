@@ -2,6 +2,7 @@ import type { MerchantWork } from "../merchant/work.ts";
 
 /** These values are owned by other services; the overview only projects them. */
 export const publicStateFields = [
+  "itemSwaps",
   "characterAppearances",
   "gameVersion", "clientUpdate", "merchantRules",
   "bankboiPrefix", "anniversaryAutoChat",

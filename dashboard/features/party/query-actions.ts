@@ -29,6 +29,7 @@ export const actionDomains = {
   '/navigate-to-monster': core,
   '/town-party': core,
   '/restock': core,
+  '/item-swaps': core,
   '/escape': core,
   '/bank-party': ['core', 'config', 'bank'],
   '/realm/switch': inventory,

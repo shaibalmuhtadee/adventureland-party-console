@@ -2,6 +2,7 @@ import {passiveStopRequired} from '../../combat/passive-travel.ts';
 import {installCombatTrace} from "../../combat/trace.ts";
 import {createEntityRefresh} from "../../combat/entity-refresh.ts";
 import { installPorcupineEquipment } from "./porcupine-equipment-runtime.ts";
+import { installItemSwaps } from './item-swaps-runtime.ts';
 import { merchantAnniversaryControl } from "../../coordinator/merchant/anniversary-control.ts";
 import { createAttackController } from "./attack-controller.ts";
 import { installSkillRuntime } from '../skills/runtime.ts';
@@ -21,6 +22,7 @@ export function installRoleRunner(
   (root as any).partyMerchantAnniversaryControl = merchantAnniversaryControl;
   root.partyRoleRunner?.stop();
   let equipment: ReturnType<typeof installPorcupineEquipment> | null = null;
+  let itemSwaps: ReturnType<typeof installItemSwaps> | null = null;
   function resolvedRole(): Role {
     return { ...defaultRole, ...classRole };
   }
@@ -57,7 +59,7 @@ export function installRoleRunner(
     active: () => active, allowed: () => combatAllowed() || !!passingTarget(),
     passing: target => target.id !== currentTarget()?.id && target.id === passingTarget()?.id,
     preparePassing: target => queueClient?.preparePassing(target) ?? false, state: () => root.partyCombatState,
-    equipmentBusy: () => !!equipment?.busy(),
+    equipmentBusy: () => !!equipment?.busy() || !!itemSwaps?.busy(),
     skillAttack: target => skills?.attack(target) ?? null,
     skillBusy: () => skills?.busy() ?? false,
     report: reportError,
@@ -201,6 +203,8 @@ export function installRoleRunner(
     root.sharedRoutine?.resetCombatMovement?.();
   }
   function equipmentTick() {
+    itemSwaps?.tick(!character.rip && combatAllowed());
+    if (itemSwaps?.busy() || itemSwaps?.ownsEquipment()) return;
     const actor = character as typeof character & { damage_type?: string };
     const target = sharedRoutine.equipmentTarget ? sharedRoutine.equipmentTarget() : currentTarget();
     equipment?.tick(target, actor.damage_type, Number(character.range), combatAllowed());
@@ -214,9 +218,9 @@ export function installRoleRunner(
   }
   function movementTick() {
     const dungeon = !!sharedRoutine.dungeonOwned?.();
-    if (dungeon && !combatAllowed()) { root.sharedRoutine?.resetCombatMovement?.(); return; }
     try {
       equipmentTick();
+      if (dungeon && !combatAllowed()) { root.sharedRoutine?.resetCombatMovement?.(); return; }
       if (!dungeon) {
         if(sharedRoutine.returnCombatActive?.()) {
           sharedRoutine.returnMovementTick?.();
@@ -327,6 +331,7 @@ export function installRoleRunner(
       if (timer) return;
       skills = installSkillRuntime(root);
       equipment = installPorcupineEquipment(root);
+      itemSwaps = installItemSwaps(root);
       game_log(character.name + " loaded generic " + resolvedRole().name + " behavior", "#51D2E1");
       active = true;
       root.partyCombatState = { at: Date.now(), stage: "start", error: null };
@@ -355,6 +360,7 @@ export function installRoleRunner(
     stop: function () {
       skills?.stop();
       equipment?.stop();
+      itemSwaps?.stop();
       queueClient?.stop();queueMarkers?.stop();
       lootClient?.stop();trace?.stop();
       active = false;

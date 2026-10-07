@@ -1,4 +1,5 @@
 import { createDungeons } from './dungeons/service.ts';
+import { createItemSwapsRoute } from './http/item-swaps.ts';
 import { dungeonOwns } from '../dungeons/contracts.ts';
 import type { HttpHandler, HttpRouter } from "./http/contracts.ts";
 import { consoleMaintenance } from './lifecycle/console-maintenance.ts';
@@ -2216,6 +2217,7 @@ export function startCoordinatorApplication(
               json: (options) => express.json(options),
               text: (options) => express.text(options),
               maps: (router) => {
+                router.post('/party-api/item-swaps', createItemSwapsRoute(party, { owned: ownedCharacter, persist: persistSettings }));
                 dungeons.install(router);
                 pontyShopping.install(router);
                 upgradePreviews.install(router);

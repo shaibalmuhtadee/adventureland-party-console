@@ -4,6 +4,7 @@ import { migrateRoutinePriorities } from '../merchant/routines.ts';
 import {validHuntSettings} from "../hunt/settings.ts";
 import { stateKeys } from "./snapshots.ts";
 import { validStandLocation } from '../merchant/stand-location.ts';
+import { validItemSwapMap } from '../../item-swaps.ts';
 
 type ObjectValue = Record<string, unknown>;
 const object = (value: unknown): value is ObjectValue =>
@@ -37,6 +38,7 @@ function validProfile(value: unknown): boolean {
 
 // Deliberately excludes jobs, credentials, runtime ownership and navigation checkpoints.
 export const validators: Record<string, (value: unknown) => boolean> = {
+  itemSwaps: validItemSwapMap,
   farmingProfiles: mapOf(validProfile),
   marked: mapOf(listOf(mark)),
   merchantMarked: mapOf(listOf(mark)),
@@ -92,6 +94,7 @@ export const validators: Record<string, (value: unknown) => boolean> = {
   gatheringNoTool: mapOf(boolean),
 };
 const perCharacter = new Set([
+  'itemSwaps',
   'farmingProfiles',
   "marked",
   "merchantMarked",

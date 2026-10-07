@@ -9,6 +9,14 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+Character cards expose per-character Inventory swaps. See
+[Inventory swaps](../../docs/inventory-swaps.md) for configuration, native batch
+ownership, restoration recovery, and manual verification. Activate this feature
+through the full supported restart to publish character and dashboard assets.
+Production dashboard build identities include the imported `runtime/` sources
+and `tools/dashboard/` pipeline. Shared helper changes invalidate cached releases
+even when no file under `dashboard/` changed.
+
 Headless slot loading opens separate Home world and Login realm selectors after
 choosing the character. Home world is a per-character Party Console preference,
 persisted in the roster journal; it initially falls back to the game's home realm.
