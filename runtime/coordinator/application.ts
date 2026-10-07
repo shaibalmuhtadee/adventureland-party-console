@@ -167,6 +167,7 @@ export function startCoordinatorApplication(
           const unavailable: HttpHandler = (_request, response) => response.status(503).json({ error: 'Metrics storage unavailable' });
           router.get('/party-api/metrics', unavailable); router.post('/party-api/metrics', unavailable);
           router.post('/party-api/metrics/reset', unavailable);
+          router.get('/party-api/metrics/kills', unavailable);
         } };
       }
     })();

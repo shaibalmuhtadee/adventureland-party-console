@@ -9,6 +9,7 @@ import { MetricsChart } from './metrics-chart';
 import { MetricsSelect, metricsControl, metricsIconControl, metricsMenu } from './metrics-controls';
 import { applyAcknowledgedResets, applyTemporaryResets, currentRate, metricGraphs, withMovingAverage, selectMetricRows, type TemporaryMetricReset, type GraphPoint, type GraphSeries } from './metrics-series';
 import { MetricsDropEstimator } from './metrics-drop-estimator';
+import { MetricsKills } from './metrics-kills';
 import { useMetricsReset } from './metrics-reset';
 
 const ranges = [{ value: 900_000, label: '15 minutes' }, { value: 3_600_000, label: '1 hour' }, { value: 21_600_000, label: '6 hours' }, { value: 86_400_000, label: '24 hours' }, { value: 604_800_000, label: '7 days' }];
@@ -25,9 +26,10 @@ function MetricsView({ active }: { active: boolean }) {
   const [duration, setDuration] = useState(3_600_000), [live, setLive] = useState(true), [clock, setClock] = useState(Date.now);
   const [customFrom, setCustomFrom] = useState(() => localDate(Date.now() - 3_600_000)), [customTo, setCustomTo] = useState(() => localDate(Date.now()));
   const [characters, setCharacters] = useState<string[]>([]), [server, setServer] = useState(''), [compare, setCompare] = useState(false);
-  const [killMonster, setKillMonster] = useState(''), [damageMonster, setDamageMonster] = useState(''), [skill, setSkill] = useState(''), [item, setItem] = useState('');
-  const [killMode, setKillMode] = useState<'rate' | 'total' | 'credits'>('rate'), [lootMode, setLootMode] = useState<'total' | 'interval'>('total'), [goldMode, setGoldMode] = useState<'balance' | 'change'>('balance');
-  const [killWindow, setKillWindow] = useState(60_000), [damageWindow, setDamageWindow] = useState(60_000);
+  const [damageMonster, setDamageMonster] = useState(''), [skill, setSkill] = useState(''), [item, setItem] = useState('');
+  const [lootMode, setLootMode] = useState<'total' | 'interval'>('total'), [goldMode, setGoldMode] = useState<'balance' | 'change'>('balance');
+  const [damageWindow, setDamageWindow] = useState(60_000);
+  const [killFiltersVersion, setKillFiltersVersion] = useState(0);
   useEffect(() => {
     if (!active || !live || !visible || duration === 0) return;
     setClock(Date.now());
@@ -44,12 +46,10 @@ function MetricsView({ active }: { active: boolean }) {
   });
   const rawData = query.data;
   const data = useMemo(() => rawData ? applyTemporaryResets(applyAcknowledgedResets(rawData, acknowledgedResets), temporaryResets) : undefined, [rawData, acknowledgedResets, temporaryResets]);
-  const filters = useMemo(() => ({ characters, server, monster: '', skill: '', item: '', kills: killMode, loot: lootMode, gold: goldMode, compare, smoothingMs: 10_000 }), [characters, server, killMode, lootMode, goldMode, compare]);
+  const filters = useMemo(() => ({ characters, server, monster: '', skill: '', item: '', loot: lootMode, gold: goldMode, compare, smoothingMs: 10_000 }), [characters, server, lootMode, goldMode, compare]);
   const graphs = useMemo(() => data ? metricGraphs(data, filters) : null, [data, filters]);
-  const killGraph = useMemo(() => data ? metricGraphs(data, { ...filters, compare: killMode === 'credits' || compare, monster: killMonster, smoothingMs: killWindow }) : null, [data, filters, killMode, compare, killMonster, killWindow]);
   const damageGraph = useMemo(() => data ? metricGraphs(data, { ...filters, monster: damageMonster, skill, smoothingMs: damageWindow }) : null, [data, filters, damageMonster, skill, damageWindow]);
-  const killAverageMs = Math.max(killWindow, data?.resolutionMs || 10_000), damageAverageMs = Math.max(damageWindow, data?.resolutionMs || 10_000);
-  const killsWithAverage = useMemo(() => killGraph ? withMovingAverage(killGraph.killRate, killGraph.killsAverage, killGraph.series, killAverageMs) : null, [killGraph, killAverageMs]);
+  const damageAverageMs = Math.max(damageWindow, data?.resolutionMs || 10_000);
   const damageWithAverage = useMemo(() => damageGraph ? withMovingAverage(damageGraph.damage, damageGraph.damageAverage, damageGraph.series, damageAverageMs) : null, [damageGraph, damageAverageMs]);
   const loot = useMemo(() => data ? metricGraphs(data, { ...filters, item }).loot : [], [data, filters, item]);
   const rows = useMemo(() => data ? selectMetricRows(data.points.flatMap(point => point.values), characters, server) : [], [data, characters, server]);
@@ -94,8 +94,8 @@ function MetricsView({ active }: { active: boolean }) {
     resetTitle: kind === 'kills' || kind === 'damage' ? 'Permanently delete all stored ' + kind + ' data' : 'Clear graph; keep stored history',
   });
   function reset() {
-    setCharacters([]); setServer(''); setCompare(false); setKillMonster(''); setDamageMonster(''); setSkill(''); setItem('');
-    setKillMode('rate'); setLootMode('total'); setGoldMode('balance'); setKillWindow(60_000); setDamageWindow(60_000); setTemporaryResets({});
+    setCharacters([]); setServer(''); setCompare(false); setKillFiltersVersion(value => value + 1); setDamageMonster(''); setSkill(''); setItem('');
+    setLootMode('total'); setGoldMode('balance'); setDamageWindow(60_000); setTemporaryResets({});
     setDuration(3_600_000); setLive(true); setClock(Date.now());
   }
   return <section className="mx-auto max-w-[1760px] px-4 py-7 md:px-6 md:py-8" aria-label="Game metrics">
@@ -128,10 +128,9 @@ function MetricsView({ active }: { active: boolean }) {
     {resetMutation.isError && <p role="status" className="mb-4 text-base text-rose-300">Could not reset metrics</p>}
     {query.isPending && !data && <p role="status" className="py-20 text-center text-base text-[#789087]">Loading…</p>}
     {data && graphs && <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-      <MetricsChart {...resetControls('kills')} title="Kills" data={killMode === 'rate' ? killsWithAverage?.data || [] : killGraph?.kills || []} series={killMode === 'rate' ? killsWithAverage?.series || [] : killGraph?.series || []}
-        currentValue={live && duration && killMode === 'rate' ? { amount: !query.isError && killGraph ? currentRate(killGraph.killRate, killGraph.series, data) : null, unit: 'kills/h' } : undefined} yLabel={killMode === 'credits' ? 'Credits / interval' : killMode === 'rate' ? 'Kills / hour' : 'Kills'} logarithmic
-        controls={<>{select('Monster', killMonster, setKillMonster, monsterOptions, 'w-32')}{select('Kill display', killMode, value => setKillMode(value === 'credits' ? 'credits' : value === 'total' ? 'total' : 'rate'), [{ value: 'rate', label: 'Rate' }, { value: 'total', label: 'Cumulative' }, { value: 'credits', label: 'Credits' }], 'w-32')}
-          {killMode === 'rate' && select('Moving-average window', String(killAverageMs), value => setKillWindow(Number(value)), averageOptions, 'w-28')}</>} />
+      <MetricsKills key={killFiltersVersion} active={active} live={live && duration !== 0} from={from} to={to} clock={clock}
+        characters={characters} server={server} catalog={catalog.data?.bestiaryCatalog} resetAt={Math.max(acknowledgedResets.kills || 0, data.resets?.kills || 0)}
+        {...resetControls('kills')} />
       <MetricsChart {...resetControls('damage')} title="DPS" data={damageWithAverage?.data || []} series={damageWithAverage?.series || []}
         currentValue={live && duration ? { amount: !query.isError && damageGraph ? currentRate(damageGraph.damage, damageGraph.series, data) : null, unit: 'damage/s' } : undefined} yLabel="Damage / sec" logarithmic
         controls={<>{select('Monster', damageMonster, setDamageMonster, monsterOptions, 'w-28')}{select('Skill', skill, setSkill, [{ value: '', label: 'All skills' }, ...skills.map(skill => ({ value: skill, label: skill }))], 'w-28')}

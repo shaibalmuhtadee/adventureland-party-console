@@ -6,7 +6,7 @@ export const METRIC_COLORS = ['#22d3ee', '#fbbf24', '#fb7185', '#a78bfa', '#4ade
 export const characterSeries = (names: string[], roster = names): GraphSeries[] => names.map(name => ({ key: 'character:' + name, label: name, color: METRIC_COLORS[Math.max(0, roster.indexOf(name)) % METRIC_COLORS.length] }));
 export interface MetricFilters {
   characters: string[]; server: string; monster: string; skill: string; item: string;
-  kills: 'rate' | 'total' | 'credits'; loot: 'total' | 'interval'; gold: 'balance' | 'change';
+  loot: 'total' | 'interval'; gold: 'balance' | 'change';
   compare: boolean; smoothingMs: number;
 }
 const sum = (values: number[]) => values.reduce((total, value) => total + value, 0);
@@ -17,8 +17,8 @@ export function selectMetricRows(rows: MetricTotals[], characters: string[], ser
 export function metricGraphs(data: MetricsResponse, filters: MetricFilters) {
   const names = filters.characters.length ? filters.characters : data.characters;
   const series = filters.compare ? characterSeries(names, data.characters) : [{ key: 'total', label: 'Tracked party', color: METRIC_COLORS[0] }];
-  const kills: GraphPoint[] = [], killRate: GraphPoint[] = [], damage: GraphPoint[] = [], gold: GraphPoint[] = [], loot: GraphPoint[] = [], ping: GraphPoint[] = [];
-  const cumulativeKills = new Map<string, number>(), cumulativeLoot = new Map<string, number>(), baselines = new Map<string, number>();
+  const damage: GraphPoint[] = [], gold: GraphPoint[] = [], loot: GraphPoint[] = [], ping: GraphPoint[] = [];
+  const cumulativeLoot = new Map<string, number>(), baselines = new Map<string, number>();
   const starts = Math.floor(data.from / data.resolutionMs) * data.resolutionMs;
   const points = new Map(data.points.map(point => [point.at, point]));
   const reset = (kind: MetricResetKind) => data.resets?.[kind] || 0;
@@ -26,22 +26,14 @@ export function metricGraphs(data: MetricsResponse, filters: MetricFilters) {
     const point = points.get(at), values = point?.values || [], selected = selectMetricRows(values, names, filters.server);
     const observedTo = Math.min(data.to, selected.reduce((latest, row) => Math.max(latest, row.last.at), at));
     const elapsed = (kind: MetricResetKind) => Math.max(1000, observedTo - Math.max(at, data.from, data.startedAt, reset(kind)));
-    const killPoint: GraphPoint = { at: Math.max(at, reset('kills')), exposureMs: elapsed('kills') };
-    const ratePoint: GraphPoint = { ...killPoint }, damagePoint: GraphPoint = { at: Math.max(at, reset('damage')), exposureMs: elapsed('damage') };
+    const damagePoint: GraphPoint = { at: Math.max(at, reset('damage')), exposureMs: elapsed('damage') };
     const goldPoint: GraphPoint = { at: Math.max(at, reset('gold')) }, lootPoint: GraphPoint = { at: Math.max(at, reset('loot')) }, pingPoint: GraphPoint = { at: Math.max(at, reset('ping')) };
     for (const line of series) {
       const lineNames = filters.compare ? [line.label] : names;
       const rows = selected.filter(row => lineNames.includes(row.character));
       const covered = (kind: MetricResetKind) => rows.some(row => row.observedMs > 0 && row.last.at >= reset(kind));
-      const count = sum((point?.kills || []).filter(kill => (!filters.server || kill.server === filters.server) &&
-        (filters.compare ? lineNames.includes(kill.actor) : !filters.characters.length || filters.characters.includes(kill.actor)) &&
-        (!filters.monster || kill.monster === filters.monster)).map(kill => kill.count));
       const acquired = sum(rows.flatMap(row => row.loot).filter(item => !filters.item || item.item === filters.item).map(item => item.quantity));
-      const credited = sum(rows.flatMap(row => row.credits).filter(credit => !filters.monster || credit.monster === filters.monster).map(credit => credit.count));
-      cumulativeKills.set(line.key, (cumulativeKills.get(line.key) || 0) + count);
       cumulativeLoot.set(line.key, (cumulativeLoot.get(line.key) || 0) + acquired);
-      ratePoint[line.key] = covered('kills') || count > 0 ? count * 3_600_000 / elapsed('kills') : null;
-      killPoint[line.key] = filters.kills === 'credits' ? covered('kills') ? credited : null : filters.kills === 'total' ? covered('kills') || count > 0 ? cumulativeKills.get(line.key) ?? 0 : null : ratePoint[line.key];
       lootPoint[line.key] = covered('loot') ? filters.loot === 'total' ? cumulativeLoot.get(line.key) ?? 0 : acquired : null;
       damagePoint[line.key] = covered('damage') ? sum(rows.flatMap(row => row.damage).filter(hit =>
         (!filters.monster || hit.monster === filters.monster) && (!filters.skill || hit.skill === filters.skill)).map(hit => hit.amount)) * 1000 / elapsed('damage') : null;
@@ -56,7 +48,6 @@ export function metricGraphs(data: MetricsResponse, filters: MetricFilters) {
       const pingRows = rows.filter(row => row.last.at >= reset('ping')), pingSamples = sum(pingRows.map(row => row.pingSamples));
       pingPoint[line.key] = pingSamples ? sum(pingRows.map(row => row.pingSum)) / pingSamples : null;
     }
-    if (at + data.resolutionMs > reset('kills')) { kills.push(killPoint); killRate.push(ratePoint); }
     if (at + data.resolutionMs > reset('damage')) damage.push(damagePoint);
     if (at + data.resolutionMs > reset('gold')) gold.push(goldPoint);
     if (at + data.resolutionMs > reset('loot')) loot.push(lootPoint);
@@ -78,7 +69,7 @@ export function metricGraphs(data: MetricsResponse, filters: MetricFilters) {
     }
     return result;
   });
-  return { series, kills, killRate, killsAverage: average(killRate), damage, damageAverage: average(damage), gold, loot, ping };
+  return { series, damage, damageAverage: average(damage), gold, loot, ping };
 }
 export function withMovingAverage(raw: GraphPoint[], average: GraphPoint[], series: GraphSeries[], windowMs: number) {
   const byTime = new Map(average.map(point => [point.at, point]));

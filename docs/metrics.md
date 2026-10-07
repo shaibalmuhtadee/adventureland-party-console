@@ -26,8 +26,7 @@ E2E testing, builds, and process restarts remain with the user unless requested.
 
 - Kills count observed party monster deaths once. Native attacker attribution is
   separate from the reporting character. Healer/tank observations cannot inflate
-  party totals. Character comparisons show killing blows. The separate Character
-  credits view shows native shared credits per character and never adds them as
+  party totals. Native shared credits remain separate and are never added as
   party deaths. Credits without corresponding observed death evidence mark
   their interval incomplete.
 - DPS sums native outgoing monster damage for tracked characters. Attack stats
@@ -67,9 +66,23 @@ in that view, and negative values disable logarithmic scaling.
 Charts expand into a keyboard-accessible overlay. Metrics has no data download
 or export controls.
 
-Kills/hour and DPS draw the raw rate and a separate dashed trailing moving
-average. The average window cannot be smaller than the returned data resolution.
-Their top-right values show the latest recorded rate while Live is enabled.
+Kills uses vertical bars by monster. Bar height counts kills in the selected
+time range. The second line beneath each monster name shows its total recorded
+kills across retained history, subject to character/server filters and resets.
+Rate labels above the bars average the selected range and normalize to 15
+minutes, 30 minutes, an hour, or a day. They use the actual collection/reset
+start when it is newer than the chosen range. Rare monsters keep meaningful
+averages between spawns rather than creating short-bucket rate spikes.
+
+The top-right kills counter totals the current calendar day in the browser's
+local timezone. It respects the selected monsters, characters, and server,
+independently of the time range chosen for the bars. The searchable monster
+filter supports multiple choices, including monsters with zero recent kills.
+With many monsters selected, the plot scrolls horizontally to keep labels legible.
+
+DPS draws the raw rate and a separate dashed trailing moving average. The
+average window cannot be smaller than the returned data resolution. Its
+top-right value shows the latest recorded rate while Live is enabled.
 The active view refreshes once a second, and characters deliver sealed frames
 once a second. History still uses bounded 10-second buckets; the newest bucket
 updates as each frame arrives.
@@ -169,6 +182,13 @@ coverage status and points. Optional comma-separated `characters` and `servers`
 filter rows and death attribution. Dashboard requests stop when Metrics is
 hidden or the browser is not visible.
 
+`GET /party-api/metrics/kills` accepts the selected `from`/`to` range and the
+calendar day's `dayFrom`/`dayTo`, plus optional `characters`/`servers` filters.
+It returns per-monster selected-range counts, retained totals and daily counts.
+Retained totals use an in-memory index rebuilt from durable buckets at startup
+and updated after accepted deaths, expiry and resets. Range/day aggregates read
+the existing bucket index rather than transmitting full history to the browser.
+
 ## Maintained source
 
 - `runtime/characters/metrics.ts`: capture, outbox and retry lifecycle.
@@ -178,6 +198,8 @@ hidden or the browser is not visible.
 - `dashboard/features/party/party-view-switch.tsx`: workspace navigation.
 - `dashboard/features/party/metrics-*.tsx` and `metrics-series.ts`: graphs,
   filtering and projections.
+- `dashboard/features/party/metrics-kills.tsx`: categorical kills, monster/rate
+  filters, per-bar rates, retained totals and the daily counter.
 - `runtime/metrics/luck.ts`: native Encouragement parsing and the independent
   ordinary/bonus drop model.
 

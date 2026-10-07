@@ -53,6 +53,23 @@ export interface MetricsResponse {
   incomplete: boolean;
   resets?: MetricResets;
 }
+export interface MonsterKillSummary {
+  monster: string;
+  count: number;
+  total: number;
+  today: number;
+}
+export interface MetricsKillsResponse {
+  version: 1;
+  from: number;
+  to: number;
+  elapsedMs: number;
+  dayFrom: number;
+  dayTo: number;
+  resetAt: number;
+  monsters: MonsterKillSummary[];
+  lastReceivedAt: number | null;
+}
 export const METRIC_RESET_KINDS = ['kills', 'damage', 'gold', 'loot', 'ping'] as const;
 export type MetricResetKind = typeof METRIC_RESET_KINDS[number];
 export type MetricResets = Partial<Record<MetricResetKind, number>>;

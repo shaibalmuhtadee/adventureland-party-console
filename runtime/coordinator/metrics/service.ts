@@ -1,6 +1,6 @@
 import { CoordinatorJsonlStore } from '../persistence/jsonl-store.ts';
 import { requestObject, type HttpRouter } from '../http/contracts.ts';
-import { METRIC_BUCKET_MS, METRIC_RESET_KINDS, type MetricResetKind, type MetricResets, type MetricDeathTotal, type MetricFrame, type MetricPoint, type MetricTotals, type MetricsResponse } from '../../metrics/contracts.ts';
+import { METRIC_BUCKET_MS, METRIC_RESET_KINDS, type MetricsKillsResponse, type MonsterKillSummary, type MetricResetKind, type MetricResets, type MetricDeathTotal, type MetricFrame, type MetricPoint, type MetricTotals, type MetricsResponse } from '../../metrics/contracts.ts';
 import { metricNumber, metricText, parseMetricFrame, parseMetricSample } from '../../metrics/parse.ts';
 
 const DAY = 86_400_000;
@@ -107,6 +107,14 @@ function storedBucket(value: unknown): StoredBucket {
 export function createMetricsService(path: string, ports: Ports) {
   const store = new CoordinatorJsonlStore(path, path + '.compact', 1_800_000);
   const buckets = new Map<string, StoredBucket>();
+  const killTotals = new Map<string, MetricDeathTotal>();
+  function indexDeaths(deaths: MetricDeathTotal[], direction: 1 | -1 = 1) {
+    for (const death of deaths) {
+      const key = JSON.stringify([death.server, death.actor, death.monster]);
+      const count = (killTotals.get(key)?.count || 0) + direction * death.count;
+      if (count > 0) killTotals.set(key, { ...death, count }); else killTotals.delete(key);
+    }
+  }
   const savedResetState = requestObject(store.get('resetState'));
   const savedResets = requestObject(savedResetState.cuts);
   const resets: MetricResets = {};
@@ -158,12 +166,14 @@ export function createMetricsService(path: string, ports: Ports) {
     }
     if (frame.first.at < (resets.ping || 0)) incoming.first.ping = null;
     if (frame.last.at < (resets.ping || 0)) incoming.last.ping = null;
+    const acceptedDeaths: MetricDeathTotal[] = [];
     for (const event of frame.kills) {
       if (event.at < (resets.kills || 0)) continue;
       if (seen(event.id, event.at) || bucket.events.some(value => value.id === event.id && Math.abs(value.at - event.at) < 5000)) continue;
       // Store a death once, attributed to the native attacker even when a tank
       // or healer reports it. Uninstrumented party members remain labelled.
       mergeDeaths(bucket.kills, [{ server, monster: event.monster, actor: event.actor, count: 1 }]);
+      acceptedDeaths.push({ server, monster: event.monster, actor: event.actor, count: 1 });
       bucket.events.push({ id: event.id, at: event.at });
     }
     for (const event of frame.loot) {
@@ -176,6 +186,7 @@ export function createMetricsService(path: string, ports: Ports) {
     allCharacters.add(character); allServers.add(server);
     bucket.receipts.push(receipt);
     write(key, bucket);
+    indexDeaths(acceptedDeaths);
   }
   function retain() {
     if (resetting) return;
@@ -183,7 +194,7 @@ export function createMetricsService(path: string, ports: Ports) {
     for (const resolution of [METRIC_BUCKET_MS, 60_000, 900_000])
     for (const [key, source] of [...buckets].filter(([, bucket]) => bucket.width === resolution).sort((a, b) => a[1].at - b[1].at)) {
       const age = now - (source.at + source.width);
-      if (age > 180 * DAY) { store.delete('bucket:' + key); buckets.delete(key); continue; }
+      if (age > 180 * DAY) { store.delete('bucket:' + key); buckets.delete(key); indexDeaths(source.kills, -1); continue; }
       const width = source.width === METRIC_BUCKET_MS && age > DAY ? 60_000
         : source.width === 60_000 && age > 30 * DAY ? 900_000 : null;
       if (!width) continue;
@@ -201,6 +212,7 @@ export function createMetricsService(path: string, ports: Ports) {
     }
   }
   try { retain(); } catch (error) { store.close(); throw error; }
+  for (const bucket of buckets.values()) indexDeaths(bucket.kills);
   const timer = setInterval(() => { if (unavailable) return; try { retain(); } catch (error) { storageFailed(error); } }, 300_000);
   timer.unref();
   async function erase(kinds: MetricResetKind[]) {
@@ -230,6 +242,7 @@ export function createMetricsService(path: string, ports: Ports) {
       if (++count % 24 === 0) await new Promise<void>(resolve => setImmediate(resolve));
     }
     store.set('resetState', { cuts: copy(resets), pending: [] });
+    if (kinds.includes('kills')) killTotals.clear();
     // Replace the append journal so the old measurement records are removed too.
     store.refactor();
   }
@@ -238,7 +251,7 @@ export function createMetricsService(path: string, ports: Ports) {
     resetting = true;
     void erase(pending).catch(storageFailed).finally(() => { resetting = false; });
   }
-  function query(from: number, to: number, characters: string[], servers: string[]): MetricsResponse {
+  function matchingBuckets(from: number, to: number): StoredBucket[] {
     // Normal one-hour reads visit hundreds of keys, not six months of history.
     const matching: StoredBucket[] = [];
     for (const [resolution, retention] of [[METRIC_BUCKET_MS, DAY + 900_000], [60_000, 30 * DAY + 900_000], [900_000, 180 * DAY]]) {
@@ -251,6 +264,10 @@ export function createMetricsService(path: string, ports: Ports) {
         if (!parent?.sources.includes(key)) matching.push(bucket);
       }
     }
+    return matching;
+  }
+  function query(from: number, to: number, characters: string[], servers: string[]): MetricsResponse {
+    const matching = matchingBuckets(from, to);
     const largest = matching.reduce((width, bucket) => Math.max(width, bucket.width), METRIC_BUCKET_MS);
     const width = Math.max(largest, Math.ceil((to - from) / (600 * largest)) * largest);
     const points = new Map<number, MetricPoint>();
@@ -269,7 +286,35 @@ export function createMetricsService(path: string, ports: Ports) {
       characters: [...allCharacters].sort(), servers: [...allServers].sort(), lastReceivedAt,
       incomplete: ordered.some(point => point.values.some(row => row.partial)), resets: copy(resets) };
   }
+  function killsQuery(from: number, to: number, dayFrom: number, dayTo: number, characters: string[], servers: string[]): MetricsKillsResponse {
+    const wanted = (death: MetricDeathTotal) => (!characters.length || characters.includes(death.actor)) && (!servers.length || servers.includes(death.server));
+    const monsters = new Map<string, MonsterKillSummary>();
+    function row(monster: string) {
+      const value = monsters.get(monster) || { monster, count: 0, total: 0, today: 0 };
+      monsters.set(monster, value); return value;
+    }
+    for (const death of killTotals.values()) if (wanted(death)) row(death.monster).total += death.count;
+    const range = matchingBuckets(from, to);
+    const countedFrom = range.reduce((start, bucket) => Math.min(start, bucket.at), from);
+    const countedTo = Math.min(ports.now(), range.reduce((end, bucket) => Math.max(end, bucket.at + bucket.width), to));
+    for (const bucket of range) for (const death of bucket.kills) if (wanted(death)) row(death.monster).count += death.count;
+    for (const bucket of matchingBuckets(dayFrom, dayTo)) for (const death of bucket.kills) if (wanted(death)) row(death.monster).today += death.count;
+    return { version: 1, from: countedFrom, to: countedTo, elapsedMs: Math.max(0, countedTo - Math.max(countedFrom, startedAt, resets.kills || 0)), dayFrom, dayTo, resetAt: resets.kills || 0,
+      monsters: [...monsters.values()].sort((a, b) => b.count - a.count || a.monster.localeCompare(b.monster)), lastReceivedAt };
+  }
   function install(router: HttpRouter) {
+    router.get('/party-api/metrics/kills', (request, response) => {
+      if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
+      if (resetting) return response.status(503).json({ error: 'Metrics reset in progress' });
+      const input = request.query || {}, now = ports.now(), from = Number(input.from ?? now - 3_600_000), to = Number(input.to ?? now),
+        dayFrom = Number(input.dayFrom), dayTo = Number(input.dayTo);
+      if (!metricNumber(from) || !metricNumber(to) || from >= to || to - from > 180 * DAY || to > now + 60_000 ||
+          !metricNumber(dayFrom) || !metricNumber(dayTo) || dayFrom >= dayTo || dayTo - dayFrom > 26 * 3_600_000)
+        return response.status(400).json({ error: 'Invalid kills range' });
+      const names = typeof input.characters === 'string' ? input.characters.split(',').slice(0, 32) : [];
+      const servers = typeof input.servers === 'string' ? input.servers.split(',').slice(0, 32) : [];
+      return response.json(killsQuery(from, to, dayFrom, Math.min(dayTo, now), names, servers));
+    });
     router.post('/party-api/metrics', (request, response) => {
       if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
       if (resetting) return response.status(503).json({ error: 'Metrics reset in progress' });
