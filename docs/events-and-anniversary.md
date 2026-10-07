@@ -14,7 +14,7 @@ each character closes any remaining gap to its visible target until the native
 attack-range check succeeds, using the target's current position if it moves.
 The same approach applies to independent attendance and respawn reentry.
 When the server announces either boss's next spawn, enabled characters start
-travelling to its registered spawn area with 60 seconds remaining. They wait there
+travelling to its registered spawn area with 120 seconds remaining. They wait there
 without acquiring the absent boss as a combat target. The live spawn retains the
 preparation route's generation and then hands off to normal combat. If the live
 report is delayed, preparation holds for up to 30 seconds past the announced time.

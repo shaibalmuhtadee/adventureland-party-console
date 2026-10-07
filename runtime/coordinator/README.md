@@ -32,7 +32,7 @@ and Mr. Green server reports through `runtime/events/halloween.ts`. The
 realm, persists its generation, and publishes it through heartbeats. Following
 characters use that same encounter. Raw boss observations remain independent of
 the commitment, so an active season without live bosses or a due announced spawn
-cannot pause ordinary activity. An announced spawn owns preparation from 60 seconds
+cannot pause ordinary activity. An announced spawn owns preparation from 120 seconds
 before its deadline through a 30-second allowance for the live report. Preparation
 uses the registered boss spawn area and keeps the same route generation when the
 boss becomes live. Scheduled spawns take priority over ordinary live attendance

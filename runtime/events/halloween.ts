@@ -7,7 +7,7 @@ export type HalloweenBoss = (typeof halloweenBosses)[number];
 export type HalloweenEncounter = Omit<Pick<SMonsterEventLiveWithCoordinates,
   'map' | 'x' | 'y' | 'hp' | 'max_hp' | 'target'>, 'map'> & { map: string; type: HalloweenBoss };
 export type HalloweenSpawn = Pick<HalloweenEncounter, 'type' | 'map' | 'x' | 'y'> & { spawnAt: number };
-export const halloweenPreparationMs = 60000;
+export const halloweenPreparationMs = 120000;
 export const halloweenSpawnGraceMs = 30000;
 /** Clock-offset estimates fluctuate between heartbeats without rescheduling a spawn. */
 export function sameHalloweenSpawn(first: HalloweenSpawn, second: HalloweenSpawn): boolean {
