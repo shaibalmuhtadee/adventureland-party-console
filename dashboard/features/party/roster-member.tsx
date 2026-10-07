@@ -7,5 +7,6 @@ export type RosterMember = {
   id: string | number;
   online?: boolean;
   home?: string | null;
+  homeWorld?: string;
   server?: string | null;
 };

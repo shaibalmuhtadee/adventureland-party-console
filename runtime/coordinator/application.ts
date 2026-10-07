@@ -2252,6 +2252,7 @@ export function startCoordinatorApplication(
                     assignSlot: assignHeadlessSlot,
                     roster: rosterPayload,
                     configuredRealm,
+                    resolveRealm: realm => my_acc.resolve_realm(realm),
                     releaseBankboi: (confirm) => bankboiService.releaseForSteam(confirm),
                   }),
                 );
@@ -2307,8 +2308,9 @@ export function startCoordinatorApplication(
     function assignHeadlessSlot(
       slot: Parameters<typeof workerSetup.assign>[0],
       name: Parameters<typeof workerSetup.assign>[1],
+      realm?: string,
     ) {
-      workerSetup.assign(slot, name);
+      workerSetup.assign(slot, name, realm);
     }
 
     async function restoreMerchantAfterBankboi(

@@ -9,6 +9,18 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+Headless slot loading opens separate Home world and Login realm selectors after
+choosing the character. Home world is a per-character Party Console preference,
+persisted in the roster journal; it initially falls back to the game's home realm.
+Login realm defaults to that home world. A manual realm selection applies only to
+the current login and does not change the saved home world. The spawn endpoint
+also applies the home-world default when its realm argument is omitted, validates
+the destination against the account's realm catalog, and assigns the worker's
+realm before starting it. Steam login behavior is unchanged. Activate with the
+supported coordinator/dashboard-only restart. Manual verification should cover
+distinct character homes, a temporary login override, reopening the picker and
+coordinator restart persistence.
+
 ## Ponty Shop
 
 See [Ponty shopping](../../docs/ponty-shopping.md) for catalog/list controls, hourly

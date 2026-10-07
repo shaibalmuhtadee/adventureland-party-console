@@ -31,6 +31,9 @@ interface Member {
   online: boolean;
 }
 export interface RosterRoutesPorts extends HandoffPorts {
+  resolveRealm(realm: string): unknown;
+  homeWorld(name: string): string;
+  setHomeWorld(name: string, realm: string): void;
   observationsChanged?(entries: import('./connection-status.ts').SteamObservation[]): void;
   members(): Member[];
   realm(): string;
@@ -115,6 +118,20 @@ export function installRosterRoutes(
     const context = realmContext();
     return !!context && (!context.current || !context.home || context.current !== context.home);
   }
+  function loginRealm(name: string, value: unknown): string {
+    const realm = value === undefined ? ports.homeWorld(name) : value;
+    if (typeof realm !== "string" || !ports.resolveRealm(realm))
+      throw new RosterConflict("Choose an available Adventure Land realm");
+    if (realm.endsWith("PVP")) throw new RosterConflict("PVP realm login is disabled");
+    return realm;
+  }
+  route("/party-api/roster/home-world", async request => {
+    const name = payload(request)?.character;
+    if (typeof name !== "string" || !ports.owned(name)) throw new RosterConflict("Unknown character");
+    const realm = loginRealm(name, payload(request)?.realm);
+    ports.setHomeWorld(name, realm);
+    return { ok: true, character: name, homeWorld: realm };
+  });
   route("/party-api/steam/action", async request => {
     const action = payload(request)?.action, name = payload(request)?.character;
     if (action === "headless-all") {
@@ -195,13 +212,14 @@ export function installRosterRoutes(
   route("/party-api/slots/:slot/spawn", async (request) => {
     const { slot, name } = spawnDestination(request);
     assertSpawnAvailable(slot,name);
+    const realm = loginRealm(name, payload(request)?.realm);
     // Reserve before awaiting account I/O, to serialize competing spawn requests.
     state.slots[slot - 1] = name;
     ports.save();
     try {
       if (!(await ports.confirmOffline(name)))
         throw new RosterConflict("Character is already online outside this slot");
-      ports.startHeadless(name, slot - 1);
+      ports.startHeadless(name, slot - 1, realm);
     } catch (error) {
       state.slots[slot - 1] = null;
       ports.save();

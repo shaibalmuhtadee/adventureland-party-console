@@ -298,10 +298,10 @@ export function usePartyConsole() {
       setRealmBusy(false);
     }
   }
-  async function spawn(slot: number, character: string, hosting: "headless" | "steam" = "headless") {
+  async function spawn(slot: number, character: string, hosting: "headless" | "steam" = "headless", realm?: string) {
     try {
       if (hosting === "steam") await post("/steam/action", { character, action: "login" });
-      else await post(`/slots/${slot}/spawn`, { character });
+      else await post(`/slots/${slot}/spawn`, { character, realm });
       setPickerSlot(null);
     } catch (error) {
       setActionError(error instanceof Error ? error.message : "Spawn failed");

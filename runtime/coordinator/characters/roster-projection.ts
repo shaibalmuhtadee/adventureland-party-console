@@ -18,6 +18,7 @@ interface RosterStatus {
   ctype?: string;
 }
 interface RosterState {
+  characterHomeRealms?: Record<string, string>;
   bankbois: Record<string, unknown>;
   statuses: Record<string, RosterStatus | undefined>;
   headlessSlots: (string | null)[];
@@ -61,6 +62,7 @@ export function createRosterProjection(
         id: entry.id,
         online: !!entry.online,
         home: entry.home || null,
+        homeWorld: state.characterHomeRealms?.[entry.name] || (entry.home ? "SR_" + entry.home.replace(/^SR_/, "") : state.activeRealm),
         server: entry.server || null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name));

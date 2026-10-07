@@ -47,7 +47,7 @@ export interface HandoffPorts {
   /** Includes game limits and active inventory operations. */
   validateParticipants(names: string[]): void;
   stopHeadless(name: string): Promise<void>;
-  startHeadless(name: string, slot: number): void;
+  startHeadless(name: string, slot: number, realm?: string): void;
   headlessReady?(name: string): boolean;
   /** Must query authoritative account data, never infer offline from heartbeat age. */
   confirmOffline(name: string): Promise<boolean>;

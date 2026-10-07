@@ -35,6 +35,7 @@ export const actionDomains = {
   '/steam/action': inventory,
   '/steam/recover': inventory,
   '/roster/create': core,
+  '/roster/home-world': core,
   '/bankbois/create': ['core', 'config', 'bank'],
   '/bank/unlock': ['bank', 'core', 'config'],
   '/merchant/clear': core,

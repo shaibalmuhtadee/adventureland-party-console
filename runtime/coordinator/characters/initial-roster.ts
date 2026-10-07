@@ -3,6 +3,7 @@ import type { RosterOwnership } from "../../roster/handoff.ts";
 import type { Lifecycle } from "./types.ts";
 
 interface SavedRoster {
+  characterHomeRealms?: Record<string, string>;
   characterAppearances?: Record<string, CharacterAppearance>;
   headlessSlots?: RosterOwnership["slots"] | null;
   steamSwitch?: RosterOwnership["handoff"];
@@ -26,6 +27,7 @@ export function initialHeadlessSlots(
 
 /** Keep legacy native-owner migration without deduplicating or rewriting saved Steam membership. */
 export function initialSteamRoster(saved: SavedRoster): {
+  characterHomeRealms: Record<string, string>;
   characterAppearances: Record<string, CharacterAppearance>;
   lifecycle: Record<string, Lifecycle>;
   steamSwitch: RosterOwnership["handoff"];
@@ -33,6 +35,7 @@ export function initialSteamRoster(saved: SavedRoster): {
   steamMembers: string[];
 } {
   return {
+    characterHomeRealms: saved.characterHomeRealms || {},
     characterAppearances: saved.characterAppearances || {},
     lifecycle: {},
     steamSwitch: saved.steamSwitch || null,

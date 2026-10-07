@@ -35,10 +35,11 @@ export function createWorkerSetup(
     ports.watch(name, block);
     return block;
   }
-  function assign(slot: number, name: string): void {
+  function assign(slot: number, name: string, realm?: string): void {
     state.headlessSlots[slot - 1] = name;
     ports.persist();
     const block = ensure(name);
+    if (realm) block.realm = realm;
     block.enabled = true;
     state.lifecycle[name] = block.connected ? "online" : "starting";
     if (!block.instance) ports.start(name);

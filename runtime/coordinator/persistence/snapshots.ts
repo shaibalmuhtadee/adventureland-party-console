@@ -9,6 +9,7 @@ export const stateKeys = {
 } as const;
 
 export const rosterFields = [
+  "characterHomeRealms",
   "characterAppearances",
   "headlessSlots",
   "nativeOwner",
