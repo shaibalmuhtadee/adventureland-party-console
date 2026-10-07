@@ -10676,7 +10676,9 @@
   }
 
   function anniversaryEpoch(input) {
-    var value = Number(input) || 0;
+    var value = Number(input);
+    if (!Number.isFinite(value) && typeof input === "string") value = Date.parse(input);
+    if (!Number.isFinite(value)) return 0;
     return value && value < 1000000000000 ? value * 1000 : value;
   }
 
