@@ -1,5 +1,6 @@
 import { createDungeons } from './dungeons/service.ts';
 import { createItemSwapsRoute } from './http/item-swaps.ts';
+import { createCombatStrategiesRoute } from './http/combat-strategies.ts';
 import { dungeonOwns } from '../dungeons/contracts.ts';
 import type { HttpHandler, HttpRouter } from "./http/contracts.ts";
 import { consoleMaintenance } from './lifecycle/console-maintenance.ts';
@@ -1569,6 +1570,8 @@ export function startCoordinatorApplication(
     }
 
     function ensureMerchantHome(reason: Parameters<typeof merchantHomeRecovery.ensureHome>[0]) {
+      const phase = (party.realmSwitch as { phase?: unknown } | null)?.phase;
+      if (phase && ["switching", "setting-home"].includes(String(phase))) return false;
       const merchant = String(party.merchantCharacter);
       if (party.steamMembers.includes(merchant)) {
         party.merchantHomeReturnAt = 0;
@@ -2220,6 +2223,7 @@ export function startCoordinatorApplication(
               text: (options) => express.text(options),
               maps: (router) => {
                 router.post('/party-api/item-swaps', createItemSwapsRoute(party, { owned: ownedCharacter, persist: persistSettings }));
+                router.post('/party-api/combat-strategies', createCombatStrategiesRoute(party, { owned: ownedCharacter, persist: persistSettings }));
                 dungeons.install(router);
                 pontyShopping.install(router);
                 upgradePreviews.install(router);
@@ -2353,6 +2357,12 @@ export function startCoordinatorApplication(
       watch: watchCharacterCode,
       owned: ownedCharacter,
       ensure: ensureCharacterBlock,
+      homeWorld: (name) => {
+        const home = ownedCharacter(name)?.home;
+        return party.characterHomeRealms[name] || (home
+          ? "SR_" + home.replace(/^SR_/, "")
+          : party.activeRealm || configuredRealm);
+      },
       start: start_char,
       persist: persistRosterState,
       later: (callback, milliseconds) => setTimeout(callback, milliseconds),

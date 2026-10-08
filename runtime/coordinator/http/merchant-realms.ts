@@ -6,6 +6,7 @@ interface MerchantRealmState {
   merchantCharacter: string | null;
   merchantCurrent: MerchantWork | null;
   activeRealm: string;
+  realmSwitch?: { phase?: string } | null;
 }
 interface RealmBlock {
   realm?: string;
@@ -76,6 +77,8 @@ export function createMerchantRealmRoutes<Block extends RealmBlock>(
     return response;
   }
   function ensureHome(req: HttpRequest, res: HttpResponse): unknown {
+    if (state.realmSwitch && ["switching", "setting-home"].includes(String(state.realmSwitch.phase)))
+      return res.status(409).json({ error: "realm switch in progress" });
     const body = requestObject(req.body),
       merchant = state.merchantCharacter;
     if (!merchant || body.character !== merchant)
