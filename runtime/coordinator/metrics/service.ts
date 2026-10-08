@@ -88,7 +88,9 @@ function storedBucket(value: unknown): StoredBucket {
     if (value.goldStart !== undefined) {
       const baseline = requestObject(value.goldStart);
       if (!metricNumber(baseline.at) || !metricNumber(baseline.gold)) throw Error('Invalid gold baseline');
-      values[values.length - 1].goldStart = { at: baseline.at, gold: baseline.gold };
+      if (baseline.goldMovement !== undefined && !metricNumber(baseline.goldMovement, -Number.MAX_SAFE_INTEGER)) throw Error('Invalid gold movement baseline');
+      values[values.length - 1].goldStart = { at: baseline.at, gold: baseline.gold,
+        ...(baseline.goldMovement === undefined ? {} : { goldMovement: baseline.goldMovement }) };
     }
   }
   const kills: MetricDeathTotal[] = [];
@@ -161,11 +163,12 @@ export function createMetricsService(path: string, ports: Ports) {
       credits: frame.first.at >= (resets.kills || 0) ? frame.credits : [], loot: [], samples: 1,
       luckSum: frame.last.luck, pingSum: frame.last.at >= (resets.ping || 0) ? frame.last.ping ?? 0 : 0,
       pingSamples: frame.last.at >= (resets.ping || 0) && frame.last.ping !== null ? 1 : 0 };
-    if (frame.first.at < (resets.gold || 0)) incoming.first.gold = 0;
-    if (frame.last.at < (resets.gold || 0)) incoming.last.gold = 0;
+    if (frame.first.at < (resets.gold || 0)) { incoming.first.gold = 0; delete incoming.first.goldMovement; }
+    if (frame.last.at < (resets.gold || 0)) { incoming.last.gold = 0; delete incoming.last.goldMovement; }
     else {
       const baseline = frame.first.at >= (resets.gold || 0) ? frame.first : frame.last;
-      incoming.goldStart = { at: baseline.at, gold: baseline.gold };
+      incoming.goldStart = { at: baseline.at, gold: baseline.gold,
+        ...(baseline.goldMovement === undefined ? {} : { goldMovement: baseline.goldMovement }) };
     }
     if (frame.first.at < (resets.ping || 0)) incoming.first.ping = null;
     if (frame.last.at < (resets.ping || 0)) incoming.last.ping = null;
@@ -238,7 +241,10 @@ export function createMetricsService(path: string, ports: Ports) {
         if (kinds.includes('kills')) row.credits = [];
         if (kinds.includes('damage')) row.damage = [];
         if (kinds.includes('loot')) row.loot = [];
-        if (kinds.includes('gold')) { row.first.gold = row.last.gold = 0; delete row.goldStart; }
+        if (kinds.includes('gold')) {
+          row.first.gold = row.last.gold = 0;
+          delete row.first.goldMovement; delete row.last.goldMovement; delete row.goldStart;
+        }
         if (kinds.includes('ping')) { row.first.ping = row.last.ping = null; row.pingSum = row.pingSamples = 0; }
       }
       write(key, bucket);

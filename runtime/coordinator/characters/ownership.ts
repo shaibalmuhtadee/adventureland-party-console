@@ -1,6 +1,7 @@
 import type { RosterOwnership } from "../../roster/handoff.ts";
 import type { RosterRoutesPorts } from "../../roster/routes.ts";
 import { recordConnections } from '../../roster/connection-status.ts';
+import { characterHomeWorld } from './home-world.ts';
 
 interface Status {
   server?: string;
@@ -163,11 +164,8 @@ export function createCoordinatorOwnershipPorts<Block extends { enabled?: boolea
     nativeBusy: () => busy(String(state.nativeOwner)),
     realm: () => state.activeRealm || ports.configuredRealm,
     resolveRealm: ports.resolveRealm,
-    homeWorld: name => {
-      const home = ports.owned(name)?.home;
-      return state.characterHomeRealms[name] || (home
-        ? "SR_" + home.replace(/^SR_/, "") : state.activeRealm || ports.configuredRealm);
-    },
+    homeWorld: name => characterHomeWorld(state.characterHomeRealms[name], ports.owned(name)?.home,
+      state.activeRealm || ports.configuredRealm),
     setHomeWorld: (name, realm) => { state.characterHomeRealms[name] = realm; ports.save(); },
     observedRealm,
     realmContext: () => {

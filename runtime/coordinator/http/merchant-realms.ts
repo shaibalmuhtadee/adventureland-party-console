@@ -1,12 +1,13 @@
 import { requestObject, type HttpRequest, type HttpResponse } from "./contracts.ts";
 import type { MerchantWork } from "../merchant/work.ts";
 import { currentMerchantReport } from '../merchant/commerce-progress.ts';
+import { realmSwitchInProgress, type RealmOperation } from '../characters/realm-switch.ts';
 
 interface MerchantRealmState {
   merchantCharacter: string | null;
   merchantCurrent: MerchantWork | null;
   activeRealm: string;
-  realmSwitch?: { phase?: string } | null;
+  realmSwitch?: Pick<RealmOperation, 'phase'> | null;
 }
 interface RealmBlock {
   realm?: string;
@@ -77,7 +78,7 @@ export function createMerchantRealmRoutes<Block extends RealmBlock>(
     return response;
   }
   function ensureHome(req: HttpRequest, res: HttpResponse): unknown {
-    if (state.realmSwitch && ["switching", "setting-home"].includes(String(state.realmSwitch.phase)))
+    if (realmSwitchInProgress(state.realmSwitch))
       return res.status(409).json({ error: "realm switch in progress" });
     const body = requestObject(req.body),
       merchant = state.merchantCharacter;

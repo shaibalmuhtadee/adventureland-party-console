@@ -31,12 +31,18 @@ E2E testing, builds, and process restarts remain with the user unless requested.
   their interval incomplete.
 - DPS sums native outgoing monster damage for tracked characters. Attack stats
   are not used as a damage estimate. Damage by other players needs their telemetry.
-- Gold history samples character balances. Net change includes spending, sales,
-  donations, mail and external transfers. It is not classified farming income.
+- Gold history samples character balances plus a persisted internal-movement
+  offset. Confirmed gold sent to another owned character or deposited in the
+  bank adds to that offset; received gold and bank withdrawals subtract from it.
+  Collection and banking therefore preserve net profit, including when viewing
+  only the fighter. Spending, sales, donations, mail and external transfers still
+  affect profit. It is not classified farming income.
   Each character starts at its first observed balance in the selected range.
   Disconnected characters retain their last known gain; joining characters do
-  not add their existing wealth as income. Bank history and transaction
-  categories are not included in this first release.
+  not add their existing wealth as income. The offset survives CODE reloads,
+  disconnects, collector retries and coordinator restarts. Older history lacks
+  transfer evidence and cannot be corrected retrospectively. Bank balances and
+  transaction categories are not shown separately.
 - Items acquired counts quantities in native chest outcomes for each recipient.
   Transfers, purchases, banking, exchange rewards and production are excluded.
   Item level and native property/stat variants are retained independently.

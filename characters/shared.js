@@ -382,6 +382,12 @@
     connected: function () { return !!character && (!parent.socket || parent.socket.connected !== false); },
     name: function () { return character.name; },
     own: ownActor,
+    ownedCharacter: function (name) {
+      var player = get_player(name);
+      return name === character.name || name === merchantCharacter ||
+        !!player && player.owner === character.owner ||
+        partyPositions.some(function (member) { return member.name === name; });
+    },
     context: function () { return {
       server: String(parent.server_region || '') + String(parent.server_identifier || '') || 'unknown',
       map: character.map, instance: String(character.in || character.map), party: currentPartyList()
@@ -1152,6 +1158,7 @@
   };
   var combatResponseListener = function (data) {
     if (!data || data.failed) return;
+    partyMetrics.goldMovement(data);
     var skill = data.place === "skill" ? (data.skill || data.name) : data.place;
     if (skill && skill !== "attack" && G.skills && G.skills[skill]) {
       queueCombatEvent("skill", "Used " + (G.skills[skill].name || skill), { skill: skill }, "skill:" + skill);

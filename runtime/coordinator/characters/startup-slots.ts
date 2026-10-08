@@ -1,6 +1,7 @@
 interface StartupWorker {
   connected?: boolean;
   enabled?: boolean;
+  realm?: string;
 }
 interface StartupSlots {
   headlessSlots: (string | null)[];
@@ -11,6 +12,7 @@ interface StartupPorts<T extends StartupWorker> {
   reserved(name: string | null): boolean;
   owned(name: string): boolean;
   ensure(name: string): T;
+  homeWorld(name: string): string | undefined;
   start(name: string): void;
   persist(): void;
 }
@@ -38,6 +40,8 @@ export function createStartupSlots<T extends StartupWorker>(
         return;
       }
       const worker = ports.ensure(name);
+      const homeWorld = ports.homeWorld(name);
+      if (homeWorld) worker.realm = homeWorld;
       if (!worker.enabled) {
         worker.enabled = true;
         ports.start(name);

@@ -29,8 +29,10 @@ export function parseMetricSample(value: unknown): MetricSample | null {
   if (!row || !metricNumber(row.at) || !metricNumber(row.gold) || !metricNumber(row.luck, 0, 1000) ||
       !(row.ping === null || metricNumber(row.ping)) || !metricNumber(row.level, 1, 1000) ||
       !metricNumber(row.xp) || !metricNumber(row.maxXp) ||
+      !(row.goldMovement === undefined || metricNumber(row.goldMovement, -Number.MAX_SAFE_INTEGER)) ||
       !(row.encouragementLuck === undefined || metricNumber(row.encouragementLuck, 1, 1000))) return null;
   return { at: row.at, gold: row.gold, luck: row.luck, ping: row.ping, level: row.level, xp: row.xp, maxXp: row.maxXp,
+    ...(row.goldMovement === undefined ? {} : { goldMovement: row.goldMovement }),
     ...(row.encouragementLuck === undefined ? {} : { encouragementLuck: row.encouragementLuck }) };
 }
 function damage(value: unknown): MetricDamage | null {

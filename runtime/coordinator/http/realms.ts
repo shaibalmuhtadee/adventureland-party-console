@@ -1,5 +1,5 @@
 import { requestObject, requestText, type HttpRequest, type HttpResponse } from "./contracts.ts";
-import type { RealmOperation } from "../characters/realm-switch.ts";
+import { realmSwitchInProgress, type RealmOperation } from "../characters/realm-switch.ts";
 
 interface RealmRouteState {
   steamMembers: string[];
@@ -93,7 +93,7 @@ export function createRealmRoutes(state: RealmRouteState, ports: RealmRoutePorts
       return res
         .status(409)
         .json({ error: "PVP realm switching is displayed but intentionally disabled" });
-    if (state.realmSwitch && ["switching", "setting-home"].includes(state.realmSwitch.phase))
+    if (realmSwitchInProgress(state.realmSwitch))
       return res.status(409).json({ error: "a realm switch is already in progress" });
     if (state.bankboiTransaction || ports.bankBusy())
       return res.status(409).json({ error: "wait for the current bankboi transaction to finish" });

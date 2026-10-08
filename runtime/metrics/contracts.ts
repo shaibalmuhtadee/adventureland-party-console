@@ -6,6 +6,8 @@ export interface MetricKill { id: string; at: number; monster: string; actor: st
 export interface MetricLoot { id: string; at: number; item: string; variant: string; quantity: number }
 export interface MetricSample {
   at: number; gold: number; luck: number; ping: number | null; level: number; xp: number; maxXp: number;
+  /** Cumulative internal gold sent/deposited minus received/withdrawn. Older history omits it. */
+  goldMovement?: number;
   /** Native Encouragement totals, separate from ordinary luckm. Older history omits this field. */
   encouragementLuck?: number;
 }
@@ -24,7 +26,7 @@ export interface MetricFrame {
 export interface MetricBatch extends MetricContext { runtime: string; frames: MetricFrame[] }
 export interface MetricTotals extends MetricContext {
   /** Independent gold baseline when other measurements survive a gold reset. */
-  goldStart?: Pick<MetricSample, 'at' | 'gold'>;
+  goldStart?: Pick<MetricSample, 'at' | 'gold' | 'goldMovement'>;
   observedMs: number;
   partial: boolean;
   damage: MetricDamage[];

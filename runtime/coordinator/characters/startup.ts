@@ -20,6 +20,7 @@ interface StartupPorts<Block> {
   watch: (name: string, worker: Block) => void;
   owned: (name: string) => { type?: string } | null | undefined;
   ensure: (name: string) => Block;
+  homeWorld: (name: string) => string | undefined;
   start: (name: string) => void;
   persist: () => void;
   later: (callback: () => void, milliseconds: number) => unknown;
@@ -41,6 +42,7 @@ export function startCoordinatorCharacters<Block extends Worker>(
     watch: ports.watch,
     owned: (name) => !!ports.owned(name),
     ensure: ports.ensure,
+    homeWorld: ports.homeWorld,
     reserved: (name) =>
       reservedForSteam(
         {

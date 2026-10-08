@@ -1,11 +1,13 @@
 'use client';
 import { useMemo, useState } from 'react';
-import type { MetricsResponse } from '../../../runtime/metrics/contracts.ts';
+import type { MetricSample, MetricsResponse } from '../../../runtime/metrics/contracts.ts';
 import { MetricsChart } from './metrics-chart';
 import { MetricsSelect } from './metrics-controls';
 import type { GraphPoint } from './metrics-series';
 
-/** Each character starts at its first observed balance. Joining the chart does
+const profitBalance = (sample: Pick<MetricSample, 'gold' | 'goldMovement'>) => sample.gold + (sample.goldMovement || 0);
+
+/** Each character starts at its first observed balance, adjusted for internal movement. Joining the chart does
  * not count existing wealth as income. Missing/offline characters retain their
  * last known gain instead of invalidating every party point.
  */
@@ -19,9 +21,9 @@ export function goldGainSeries(data: MetricsResponse, characters: string[], serv
       .sort((a, b) => a.first.at - b.first.at);
     for (const row of rows) {
       const previous = balances.get(row.character);
-      const first = row.goldStart && row.goldStart.at >= start ? row.goldStart.gold : row.first.at >= start ? row.first.gold : row.last.gold;
-      if (!previous) balances.set(row.character, { baseline: first, balance: row.last.gold, at: row.last.at });
-      else if (row.last.at >= previous.at) { previous.balance = row.last.gold; previous.at = row.last.at; }
+      const first = row.goldStart && row.goldStart.at >= start ? row.goldStart : row.first.at >= start ? row.first : row.last;
+      if (!previous) balances.set(row.character, { baseline: profitBalance(first), balance: profitBalance(row.last), at: row.last.at });
+      else if (row.last.at >= previous.at) { previous.balance = profitBalance(row.last); previous.at = row.last.at; }
     }
     points.push({ at: Math.max(point.at, start), gain: balances.size ? [...balances.values()].reduce((total, value) => total + value.balance - value.baseline, 0) : null });
   }
@@ -34,9 +36,12 @@ export function MetricsGold({ data, characters, server, onReset, resetting, rese
   const available = data.characters.filter(name => !characters.length || characters.includes(name));
   const selected = available.includes(character) ? character : '';
   const points = useMemo(() => goldGainSeries(data, selected ? [selected] : characters, server), [data, selected, characters, server]);
+  const legacy = data.points.some(point => point.values.some(row => row.last.goldMovement === undefined &&
+    (!selected || row.character === selected) && (!characters.length || characters.includes(row.character)) && (!server || row.server === server)));
   const latest = points[points.length - 1]?.gain ?? null;
   return <MetricsChart title="Gold history" data={points} series={[{ key: 'gain', label: selected || 'Combined net gold gain', color: '#4ade80' }]}
     yLabel="Gold gained (net)" currentValue={{ amount: latest, unit: 'gold gained', label: 'Net gold gained in selected range' }}
     onReset={onReset} resetting={resetting} resetDisabled={resetDisabled} resetTitle={resetTitle}
+    optionDetails={<p className="text-sm text-[#aabfb6]">Internal transfers and bank movements are excluded.{legacy ? ' Older history predates transfer tracking.' : ''}</p>}
     controls={<MetricsSelect label="Gold character" value={selected} onChange={setCharacter} options={[{ value: '', label: 'All characters' }, ...available.map(name => ({ value: name, label: name }))]} className="w-48 max-w-none" />} />;
 }

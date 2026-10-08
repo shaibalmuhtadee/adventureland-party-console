@@ -36,7 +36,17 @@ the destination against the account's realm catalog, and assigns the worker's
 realm before starting it. Steam login behavior is unchanged. Activate with the
 supported coordinator/dashboard-only restart. Manual verification should cover
 distinct character homes, a temporary login override, reopening the picker and
-coordinator restart persistence.
+coordinator restart persistence. Startup restoration uses the same home-world
+resolution as explicit headless login, replacing stale worker realm settings
+before starting saved slots. Merchant home recovery and its HTTP endpoint yield
+while the shared realm-switch state owns those assignments.
+
+Crab knife farming holds the spawn center while crabs remain in knife range.
+If every surviving crab is beyond that range, it approaches a reachable crab
+inside the selected farm region, attacks there and returns when the center has
+targets again. This prevents a center-only hold from stopping respawns forever.
+Publish character assets through the full restart and manually verify a dry
+center, resumed kills and return to the preferred position.
 
 ## Ponty Shop
 

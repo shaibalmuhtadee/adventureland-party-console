@@ -1,6 +1,6 @@
 import type { Entity, ItemInfo, MonsterEntity, ServerToClient_hit, ServerToClient_chest_opened, ServerToClient_chest_opened_loot } from 'typed-adventureland';
 import { METRIC_BUCKET_MS, type MetricBatch, type MetricFrame, type MetricSample } from '../metrics/contracts.ts';
-import { parseMetricFrame } from '../metrics/parse.ts';
+import { metricNumber, parseMetricFrame } from '../metrics/parse.ts';
 import { encouragementLuck } from '../metrics/luck.ts';
 
 interface Ports {
@@ -9,13 +9,14 @@ interface Ports {
   connected(): boolean;
   name(): string;
   own(actor: string): boolean;
+  ownedCharacter(name: string): boolean;
   context(): { server: string; map: string; instance: string; party: string[] };
   sample(): Omit<MetricSample, 'at'>;
   send(batch: MetricBatch): Promise<unknown>;
   storage: Pick<Storage, 'getItem' | 'setItem'>;
 }
 type Frame = MetricFrame & { server: string };
-interface Journal { runtime: string; sequence: number; queue: Frame[]; lost: boolean }
+interface Journal { runtime: string; sequence: number; queue: Frame[]; lost: boolean; goldMovement: number }
 // Upstream hit declarations omit `dead` and `actor`, seen in native AoE packets.
 type Hit = Omit<ServerToClient_hit, 'source'> & { source?: string; dead?: boolean; actor?: string; skill?: string; mtype?: string };
 // Native cache_item preserves properties omitted by upstream chest item types.
@@ -32,7 +33,7 @@ function isMonsterTarget(target: Target | null | undefined): target is MonsterTa
 /** One collector per CODE generation. Retries keep their original bucket and sequence. */
 export function installPartyMetrics(ports: Ports) {
   const key = 'party-metrics-v1:' + ports.name();
-  const journal: Journal = { runtime: Date.now() + '-' + Math.random().toString(36).slice(2), sequence: 0, queue: [], lost: false };
+  const journal: Journal = { runtime: Date.now() + '-' + Math.random().toString(36).slice(2), sequence: 0, queue: [], lost: false, goldMovement: 0 };
   // Restored data crosses a storage boundary. Accept only our bounded versioned envelope;
   // the coordinator performs full frame validation before accepting measurements.
   try {
@@ -41,6 +42,7 @@ export function installPartyMetrics(ports: Ports) {
         'sequence' in saved && typeof saved.sequence === 'number' && 'queue' in saved && Array.isArray(saved.queue)) {
       journal.runtime = saved.runtime;
       journal.sequence = saved.sequence;
+      if ('goldMovement' in saved && metricNumber(saved.goldMovement, -Number.MAX_SAFE_INTEGER)) journal.goldMovement = saved.goldMovement;
       for (const value of saved.queue.slice(-720)) {
         const parsed = parseMetricFrame(value);
         if (parsed && value && typeof value === 'object' && 'server' in value && typeof value.server === 'string')
@@ -67,7 +69,7 @@ export function installPartyMetrics(ports: Ports) {
     seen.set(id, at);
     return true;
   }
-  function sample(at: number): MetricSample { return { ...ports.sample(), at }; }
+  function sample(at: number): MetricSample { return { ...ports.sample(), at, goldMovement: journal.goldMovement }; }
   function persist() {
     try { ports.storage.setItem(key, JSON.stringify(journal)); }
     catch { journal.lost = true; }
@@ -84,6 +86,22 @@ export function installPartyMetrics(ports: Ports) {
       journal.queue.splice(0, journal.queue.length - 720);
       journal.lost = true;
     }
+    persist();
+  }
+  function goldMovement(data: unknown) {
+    // Native bank gold replies are absent from the upstream response union.
+    // Parse the raw socket boundary without widening the game's declared types.
+    if (!ports.current() || !data || typeof data !== 'object' ||
+        !('response' in data) || !('gold' in data) || !metricNumber(data.gold) ||
+        'failed' in data && data.failed) return;
+    const response = data.response;
+    const transfer = response === 'gold_sent' || response === 'gold_received';
+    const bank = response === 'bank_store' || response === 'bank_withdraw';
+    if (!transfer && !bank) return;
+    // The native response names the other character. External gifts/payments
+    // remain real income/expenses; moving gold within this account does not.
+    if (transfer && (!('name' in data) || typeof data.name !== 'string' || !ports.ownedCharacter(data.name))) return;
+    journal.goldMovement += (response === 'gold_sent' || response === 'bank_store' ? 1 : -1) * data.gold;
     persist();
   }
   function frame(at: number) {
@@ -187,7 +205,7 @@ export function installPartyMetrics(ports: Ports) {
     void flush();
   }
   const timer = setInterval(pulse, 1000);
-  return { hit, loot, credit };
+  return { hit, loot, credit, goldMovement };
 }
 function itemProperties(item: Partial<Pick<ItemInfo, 'p' | 'stat_type'>>) {
   return { ...(item.p ? { p: item.p } : {}), ...(item.stat_type ? { stat_type: item.stat_type } : {}) };

@@ -18,6 +18,8 @@ import { initializeStandLocation, standLocationRoute } from './merchant/stand-lo
 import { createRareRouteDistance } from './navigation/rare-route-distance.ts';
 import { createPontyShopping } from './merchant/ponty-shopping.ts';
 import { createMetricsService } from './metrics/service.ts';
+import { characterHomeWorld } from './characters/home-world.ts';
+import { realmSwitchInProgress } from './characters/realm-switch.ts';
 export function startCoordinatorApplication(
   platform: CoordinatorApplicationPlatform,
 ): Promise<void> {
@@ -1570,8 +1572,7 @@ export function startCoordinatorApplication(
     }
 
     function ensureMerchantHome(reason: Parameters<typeof merchantHomeRecovery.ensureHome>[0]) {
-      const phase = (party.realmSwitch as { phase?: unknown } | null)?.phase;
-      if (phase && ["switching", "setting-home"].includes(String(phase))) return false;
+      if (realmSwitchInProgress(party.realmSwitch)) return false;
       const merchant = String(party.merchantCharacter);
       if (party.steamMembers.includes(merchant)) {
         party.merchantHomeReturnAt = 0;
@@ -2357,12 +2358,8 @@ export function startCoordinatorApplication(
       watch: watchCharacterCode,
       owned: ownedCharacter,
       ensure: ensureCharacterBlock,
-      homeWorld: (name) => {
-        const home = ownedCharacter(name)?.home;
-        return party.characterHomeRealms[name] || (home
-          ? "SR_" + home.replace(/^SR_/, "")
-          : party.activeRealm || configuredRealm);
-      },
+      homeWorld: name => characterHomeWorld(party.characterHomeRealms[name], ownedCharacter(name)?.home,
+        party.activeRealm || configuredRealm),
       start: start_char,
       persist: persistRosterState,
       later: (callback, milliseconds) => setTimeout(callback, milliseconds),

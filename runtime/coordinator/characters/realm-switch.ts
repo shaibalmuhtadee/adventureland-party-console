@@ -15,6 +15,11 @@ export interface RealmOperation {
   homeRealm?: string | null;
   homeExecutor?: string;
 }
+
+/** Party realm transitions own worker assignments until arrival and home confirmation finish. */
+export function realmSwitchInProgress(operation: Pick<RealmOperation, 'phase'> | null | undefined): boolean {
+  return operation?.phase === 'switching' || operation?.phase === 'setting-home';
+}
 interface RealmStatus {
   seenAt: number;
   server?: string;
