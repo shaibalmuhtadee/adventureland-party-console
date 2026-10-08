@@ -3025,11 +3025,15 @@
     if (committedHuntEncounter(target) || typeof huntTravelDefense === "function" && huntTravelDefense() && !(rule && rule.enabled && rule.keepMoving)) return false;
     var key = passingKey(target), now = Date.now() + coordinatorClockOffset;
     if (target.dead || target.hp === 0) return false;
+    // Ordinary farming has no passing reservation. Do not scan its growing
+    // death history on every target, skill and movement eligibility check.
+    var reserved = !!(passingEncounters[key] && now - passingEncounters[key].at < 60000) ||
+      peerPassingEncounters.some(function(e){return passingKey(e)===key && now-e.at<60000;}) ||
+      !!(groupedCombat && (groupedCombat.passingEncounters || []).some(function(e) {return passingKey(e) === key && now-e.at<60000;}));
+    if (!reserved) return false;
     var passingDeaths = (typeof fightDeaths !== 'undefined' ? fightDeaths : []).concat(groupedCombat && groupedCombat.deaths || []);
     if (passingDeaths.some(function(d){return passingKey(d)===key && now-d.at<60000;})) return false;
-    if (peerPassingEncounters.some(function(e){return passingKey(e)===key && now-e.at<60000;})) return true;
-    return !!(passingEncounters[key] && now - passingEncounters[key].at < 60000) ||
-      !!(groupedCombat && (groupedCombat.passingEncounters || []).some(function(e) {return passingKey(e) === key && now-e.at<60000;}));
+    return true;
   }
   function passingTravelAllowed() {
     if (character.c && character.c.town || typeof movement !== 'undefined' && movement.transition && movement.transition()) return false;
