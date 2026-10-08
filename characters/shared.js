@@ -384,7 +384,7 @@
     own: ownActor,
     ownedCharacter: function (name) {
       var player = get_player(name);
-      return name === character.name || name === merchantCharacter ||
+      return name === character.name ||
         !!player && player.owner === character.owner ||
         partyPositions.some(function (member) { return member.name === name; });
     },
@@ -5182,13 +5182,16 @@
 
   // Transfers share the native call budget with attacks without stopping combat.
   var COMBAT_HANDOFF_MAX_CC = 170;
+  var MERCHANT_HANDOFF_SEND_INTERVAL = 500, merchantHandoffLastSendAt = 0;
   async function waitForCallBudget(deadline) {
     var owner = lastCommand, revision = navigationIntent.revision;
-    while (Math.ceil(Number(character.cc) || 0) >= COMBAT_HANDOFF_MAX_CC) {
+    // Space sends so native call-cost reports can catch up between transfers.
+    while ((Number(character.cc) || 0) > COMBAT_HANDOFF_MAX_CC ||
+        Date.now() - merchantHandoffLastSendAt < MERCHANT_HANDOFF_SEND_INTERVAL) {
       if (!runtimeCurrent() || character.rip || owner !== lastCommand || navigationIntent.revision !== revision)
         throw new Error("interrupted");
       if (Date.now() >= deadline) throw new Error("combat handoff timed out waiting for call budget");
-      await sleep(500);
+      await sleep(100);
     }
     if (!runtimeCurrent() || character.rip || owner !== lastCommand || navigationIntent.revision !== revision)
       throw new Error("interrupted");
@@ -5332,7 +5335,6 @@
       // Only the follow-up visit depends on the remaining free slots.
       if (requests[i].kind === "cleanout" && !cleanoutEmergency) break;
       if (command.combatHandoff) {
-        await waitForCallBudget(handoffDeadline);
         await waitForHandoffRecipient(command.merchant, handoffDeadline);
         assertMerchantContinuation(command);
       }
@@ -5358,11 +5360,16 @@
         await refreshCompoundProtection(command);
         if (!compoundAvailableStock(command)[slot]) continue;
       }
+      // Range and inventory requests above can yield while combat spends calls.
+      await waitForCallBudget(handoffDeadline);
+      assertMerchantContinuation(command);
+      if (!sameItem(character.items[slot], requests[i].item)) continue;
       if (itemSwapReserved(character.items[slot]) || isPersonalTracker(character.items[slot]) || command.cleanout && cleanoutProtected(character.items[slot])) continue;
       var sendQuantity = Math.min(Number(requests[i].quantity) || itemQuantity(character.items[slot]),
         itemQuantity(character.items[slot]));
       if (requests[i].mark && (requests[i].mark.deconstructionId || requests[i].mark.npcSaleId) && (character.items[slot].l || character.items[slot].b)) continue;
       var clearsSlot = sendQuantity >= itemQuantity(character.items[slot]);
+      merchantHandoffLastSendAt = Date.now();
       await send_item(command.merchant, slot, sendQuantity);
       if (clearsSlot) cleanoutFreeSlots += 1;
       sent.push(requests[i]);
@@ -5377,11 +5384,18 @@
     var excess = Math.max(0, character.gold);
     assertMerchantContinuation(command);
     if (excess && command.combatHandoff) {
-      await waitForCallBudget(handoffDeadline);
       await waitForHandoffRecipient(command.merchant, handoffDeadline);
       assertMerchantContinuation(command);
     }
-    if (excess) await send_gold(command.merchant, excess);
+    if (excess) {
+      await waitForCallBudget(handoffDeadline);
+      assertMerchantContinuation(command);
+      excess = Math.max(0, character.gold);
+      if (excess) {
+        merchantHandoffLastSendAt = Date.now();
+        await send_gold(command.merchant, excess);
+      }
+    }
     await request("/merchant/handoff-complete", { method: "POST", body: {
       jobId: command.jobId, commandId: command.id, character: character.name, sent: sent, banked: banked, kept: kept, cleaned: cleaned,
       cleanoutRemaining: !!command.cleanout && cleanoutFreeSlots <= 3 && sent.length < requests.length, gold: excess,
