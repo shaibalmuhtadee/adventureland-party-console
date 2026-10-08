@@ -57,12 +57,30 @@ test('unknown files survive and corrupt current manifests prevent all deletion',
  await assert.rejects(cleanGame(directory,true),/checksum/);assert.equal(await fs.readFile(unknown,'utf8'),'keep');
  await verifyManifest(directory,old);
 }));
+// Filesystem isolation exercises real casing and junctions without deleting live builds.
+// Failure modes: casing rejects an ordinary Windows root; redirected roots or
+// descendants permit deletion; escaped paths or the root itself permit deletion.
+test('cleanup accepts Windows root casing differences', {skip: process.platform !== 'win32'},()=>fixture(async root=>{
+ const mixedRoot=path.join(path.dirname(root),path.basename(root).toUpperCase());
+ await fs.writeFile(path.join(root,'obsolete.txt'),'old');
+ const removal=await inspectRemoval(mixedRoot,'obsolete.txt');
+ assert.equal(removal.bytes,3);
+ await applyRemovals(mixedRoot,[removal]);
+ await assert.rejects(fs.access(path.join(root,'obsolete.txt')),/ENOENT/);
+ await fs.access(root);
+}));
 test('store lock excludes concurrent mutation and cleanup refuses escaped paths and junctions',()=>fixture(async root=>{
  await withBuildLock(root,async()=>{await assert.rejects(withBuildLock(root,async()=>{}),/locked/);});
  await assert.rejects(inspectRemoval(root,'../outside'),/escaped/);
+ await assert.rejects(inspectRemoval(root,'.'),/escaped/);
  const target=path.join(root,'target');await fs.mkdir(target);
  const link=path.join(root,'link');await fs.symlink(target,link,'junction');
- try {await assert.rejects(inspectRemoval(root,'link'),/links/);} finally {await fs.unlink(link);}
+ await fs.writeFile(path.join(target,'keep.txt'),'keep');
+ try {
+  await assert.rejects(inspectRemoval(root,'link'),/links/);
+  await assert.rejects(inspectRemoval(link,'keep.txt'),/redirected/);
+  assert.equal(await fs.readFile(path.join(target,'keep.txt'),'utf8'),'keep');
+ } finally {await fs.unlink(link);}
 }));
 test('dashboard retains 20 releases plus live older versions, removes validation but preserves settings',()=>fixture(async root=>{
  const ids=[];

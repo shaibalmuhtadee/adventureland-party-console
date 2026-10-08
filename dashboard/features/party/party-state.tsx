@@ -41,6 +41,7 @@ import { UpgradeMark } from "./upgrade-mark";
 import { Withdrawal } from "./withdrawal";
 
 export type PartyState = {
+  autoConsumables?: import('../../../runtime/consumables').AutoConsumables;
   itemSwaps?: import('../../../runtime/item-swaps').ItemSwaps;
   upgradeOfferingRules?: import("../../../runtime/upgrade-offerings").UpgradeOfferingRule[];
   upgradeOfferingStock?: Partial<Record<import("../../../runtime/upgrade-offerings").UpgradeOffering, number>>;

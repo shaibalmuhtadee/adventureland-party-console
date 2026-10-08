@@ -399,6 +399,7 @@ export function usePartyConsole() {
       | "return-leader"
       | "equip"
       | "use-item"
+      | "auto-consumable"
       | "unequip"
       | "mark"
       | "merchant-mark"

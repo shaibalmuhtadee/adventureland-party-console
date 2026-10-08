@@ -133,7 +133,8 @@ export function createRareHunting(input: unknown, hooks: Hooks) {
   function memberProtected(name: string) {
     const s = party.statuses[name];
     if (!s) return commandProtected(name);
-    if (s.joinedEvent || s.movement?.event || s.eventTraveling || s.rip) return true;
+    // Selected live events own departure before the join marker arrives.
+    if (s.activeEvent || s.joinedEvent || s.mapEvent || s.movement?.event || s.eventTraveling || s.rip) return true;
     if (Number(s.max_hp) > 0 && Number(s.hp) / Number(s.max_hp) < 0.35) return true;
     return commandProtected(name);
   }

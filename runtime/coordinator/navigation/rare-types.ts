@@ -83,7 +83,9 @@ export interface Status extends Point {
   hp?: number;
   max_hp?: number;
   ctype?: string;
-  joinedEvent?: string;
+  activeEvent?: ObservedCharacterStatus["activeEvent"];
+  joinedEvent?: ObservedCharacterStatus["joinedEvent"];
+  mapEvent?: string | null;
   movement?: { event?: unknown };
   eventTraveling?: boolean;
   items?: ObservedCharacterStatus['items'];

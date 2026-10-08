@@ -5,6 +5,7 @@ import type { Item, InventoryEntry } from "../contracts/item.ts";
 import type { CommandOutcome } from "../navigation/manual-commands.ts";
 import type { MerchantCommand } from "../merchant/work.ts";
 import { guardBankWithdrawal } from "./withdrawal-bank-guard.ts";
+import { isRenewableConsumable, type AutoConsumables } from '../../consumables.ts';
 
 interface Delivery extends DeliveryRequest {
   slot: number;
@@ -18,7 +19,8 @@ interface Withdrawal {
   item?: Item | null;
 }
 type TransferState = Parameters<typeof guardBankWithdrawal>[0] & {
-  statuses?: Record<string, import("../contracts/position.ts").ObservedPosition | undefined>;
+  statuses?: Record<string, (import("../contracts/position.ts").ObservedPosition & Pick<import('../status/observed-status.ts').ObservedCharacterStatus, 'items'>) | undefined>;
+  autoConsumables: AutoConsumables;
   merchantCharacter: string | null;
   merchantWeapon: { item?: Item } | null;
   merchantDeliveries: Record<string, Delivery[] | undefined>;
@@ -177,11 +179,28 @@ export function createTransferCommands(state: TransferState, ports: TransferPort
         );
     return null;
   }
+  function renewableInventoryItem(name: string, slot: unknown, item: Item): boolean {
+    const entry = state.statuses?.[name]?.items?.find(entry => entry?.slot === slot);
+    return !!entry?.item && entry.item.name === item.name && isRenewableConsumable(entry.meta?.definition);
+  }
+  function automaticConsumable(body: Request, name: string, item: Item & { name: string }): CommandOutcome {
+    if (body.enabled === false) {
+      if (state.autoConsumables[name] === item.name) delete state.autoConsumables[name];
+    } else {
+      if (body.enabled !== true || !Number.isSafeInteger(body.slot) || !renewableInventoryItem(name, body.slot, item))
+        return { status: 400, body: { error: 'Choose a timed consumable from the character inventory' } };
+      state.autoConsumables[name] = item.name;
+    }
+    ports.persist();
+    return null;
+  }
   function handle(body: Request): CommandOutcome {
     const item = requestObject(body.item),
       name = requestText(body.character);
     if (typeof item.name !== "string") return undefined;
     switch (body.type) {
+      case "auto-consumable":
+        return automaticConsumable(body, name, { ...item, name: item.name });
       case "use-item":
         if (!Number.isSafeInteger(body.slot) || Number(body.slot) < 0) return undefined;
         state.commands[name] = {id: ports.nextCommand(), type: "use-item", item, slot: Number(body.slot)};

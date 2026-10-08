@@ -33,7 +33,8 @@ export interface Removal { path: string; bytes: number }
 export async function inspectRemoval(root: string, relative: string): Promise<Removal> {
   const base = path.resolve(root), target = path.resolve(base, relative);
   if (!target.startsWith(base + path.sep)) throw new Error('Cleanup escaped its root: ' + target);
-  if (await realpath(base) !== base) throw new Error('Cleanup root is redirected: ' + base);
+  // path.relative respects Windows casing while still detecting redirected roots.
+  if (path.relative(base, await realpath(base)) !== '') throw new Error('Cleanup root is redirected: ' + base);
   let current = base;
   for (const component of path.relative(base, target).split(path.sep)) {
     current = path.join(current, component);

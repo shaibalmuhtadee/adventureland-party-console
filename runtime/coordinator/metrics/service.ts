@@ -1,6 +1,8 @@
 import { CoordinatorJsonlStore } from '../persistence/jsonl-store.ts';
 import { requestObject, type HttpRouter } from '../http/contracts.ts';
-import { METRIC_BUCKET_MS, METRIC_RESET_KINDS, type MetricsKillsResponse, type MonsterKillSummary, type MetricResetKind, type MetricResets, type MetricDeathTotal, type MetricFrame, type MetricPoint, type MetricTotals, type MetricsResponse } from '../../metrics/contracts.ts';
+import { METRIC_BUCKET_MS, METRIC_RESET_KINDS, type MetricsBarsResponse, type MetricBarSummary, type MetricsKillsResponse, type MonsterKillSummary, type MetricResetKind, type MetricResets, type MetricDeathTotal, type MetricFrame, type MetricPoint, type MetricTotals, type MetricsResponse } from '../../metrics/contracts.ts';
+import { createMeasurementIndex } from './measurement-index.ts';
+import { measurementSummary } from './measurement-summary.ts';
 import { metricNumber, metricText, parseMetricFrame, parseMetricSample } from '../../metrics/parse.ts';
 
 const DAY = 86_400_000;
@@ -107,6 +109,7 @@ function storedBucket(value: unknown): StoredBucket {
 export function createMetricsService(path: string, ports: Ports) {
   const store = new CoordinatorJsonlStore(path, path + '.compact', 1_800_000);
   const buckets = new Map<string, StoredBucket>();
+  const measurements = createMeasurementIndex();
   const killTotals = new Map<string, MetricDeathTotal>();
   function indexDeaths(deaths: MetricDeathTotal[], direction: 1 | -1 = 1) {
     for (const death of deaths) {
@@ -187,6 +190,7 @@ export function createMetricsService(path: string, ports: Ports) {
     bucket.receipts.push(receipt);
     write(key, bucket);
     indexDeaths(acceptedDeaths);
+    measurements.add([incoming]);
   }
   function retain() {
     if (resetting) return;
@@ -194,7 +198,7 @@ export function createMetricsService(path: string, ports: Ports) {
     for (const resolution of [METRIC_BUCKET_MS, 60_000, 900_000])
     for (const [key, source] of [...buckets].filter(([, bucket]) => bucket.width === resolution).sort((a, b) => a[1].at - b[1].at)) {
       const age = now - (source.at + source.width);
-      if (age > 180 * DAY) { store.delete('bucket:' + key); buckets.delete(key); indexDeaths(source.kills, -1); continue; }
+      if (age > 180 * DAY) { store.delete('bucket:' + key); buckets.delete(key); indexDeaths(source.kills, -1); measurements.add(source.values, -1); continue; }
       const width = source.width === METRIC_BUCKET_MS && age > DAY ? 60_000
         : source.width === 60_000 && age > 30 * DAY ? 900_000 : null;
       if (!width) continue;
@@ -212,7 +216,7 @@ export function createMetricsService(path: string, ports: Ports) {
     }
   }
   try { retain(); } catch (error) { store.close(); throw error; }
-  for (const bucket of buckets.values()) indexDeaths(bucket.kills);
+  for (const bucket of buckets.values()) { indexDeaths(bucket.kills); measurements.add(bucket.values); }
   const timer = setInterval(() => { if (unavailable) return; try { retain(); } catch (error) { storageFailed(error); } }, 300_000);
   timer.unref();
   async function erase(kinds: MetricResetKind[]) {
@@ -243,6 +247,7 @@ export function createMetricsService(path: string, ports: Ports) {
     }
     store.set('resetState', { cuts: copy(resets), pending: [] });
     if (kinds.includes('kills')) killTotals.clear();
+    measurements.clear(kinds);
     // Replace the append journal so the old measurement records are removed too.
     store.refactor();
   }
@@ -303,6 +308,20 @@ export function createMetricsService(path: string, ports: Ports) {
       monsters: [...monsters.values()].sort((a, b) => b.count - a.count || a.monster.localeCompare(b.monster)), lastReceivedAt };
   }
   function install(router: HttpRouter) {
+    router.get('/party-api/metrics/bars', (request, response) => {
+      if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
+      if (resetting) return response.status(503).json({ error: 'Metrics reset in progress' });
+      const input = request.query || {}, metric = input.metric, now = ports.now(), from = Number(input.from ?? now - 3_600_000), to = Number(input.to ?? now), dayFrom = Number(input.dayFrom), dayTo = Number(input.dayTo);
+      if ((metric !== 'damage' && metric !== 'loot') || !metricNumber(from) || !metricNumber(to) || from >= to || to - from > 180 * DAY || to > now + 60_000 ||
+          !metricNumber(dayFrom) || !metricNumber(dayTo) || dayFrom >= dayTo || dayTo - dayFrom > 26 * 3_600_000)
+        return response.status(400).json({ error: 'Invalid measurement range' });
+      const list = (value: unknown) => typeof value === 'string' ? value.split(',').filter(Boolean).slice(0, 64) : [];
+      const scope = { from, to, now, startedAt, resetAt: resets[metric] || 0, dayFrom, dayTo: Math.min(dayTo, now),
+        characters: list(input.characters), servers: list(input.servers), monsters: list(input.monsters), skills: list(input.skills), items: list(input.items) };
+      const source = { range: matchingBuckets(from, to), day: matchingBuckets(dayFrom, Math.min(dayTo, now)), damage: measurements.damage(), loot: measurements.loot(), lastReceivedAt };
+      const summary = metric === 'damage' ? measurementSummary({ ...scope, metric, by: input.by === 'skill' ? 'skill' : 'character' }, source) : measurementSummary({ ...scope, metric, by: 'item' }, source);
+      return response.json(summary);
+    });
     router.get('/party-api/metrics/kills', (request, response) => {
       if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
       if (resetting) return response.status(503).json({ error: 'Metrics reset in progress' });

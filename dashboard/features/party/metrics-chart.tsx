@@ -1,46 +1,37 @@
 'use client';
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
-import { createPortal } from 'react-dom';
+import { useId, useState, type ReactNode } from 'react';
 import { Bar, CartesianGrid, ComposedChart, LabelList, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
-import { Expand, ListFilter, RotateCcw, LoaderCircle, X } from 'lucide-react';
+import { SlidersHorizontal, RotateCcw, LoaderCircle } from 'lucide-react';
 import type { GraphPoint, GraphSeries } from './metrics-series';
-import { MetricsMenu, MetricsSelect, metricsIconControl } from './metrics-controls';
+import { MetricsMenu, MetricsSelect, metricsControl } from './metrics-controls';
 
-export const metricFormat = (value: number) => new Intl.NumberFormat(undefined, { maximumFractionDigits: 2, notation: Math.abs(value) >= 10000 ? 'compact' : 'standard' }).format(value);
+export const metricFormat = (value: number) => new Intl.NumberFormat(undefined, { ...(Math.abs(value) > 0 && Math.abs(value) < 1 ? { maximumSignificantDigits: 3 } : { maximumFractionDigits: 2 }), notation: Math.abs(value) >= 10000 ? 'compact' : 'standard' }).format(value);
 interface Props {
   title: string;
   data: GraphPoint[];
   series: GraphSeries[];
   yLabel: string;
-  xLabel?: string;
   xFormat?: (value: number) => string;
   type?: 'line' | 'bar';
   categoryAxis?: boolean;
   logarithmic?: boolean;
   logarithmicX?: boolean;
   currentValue?: { amount: number | null; unit: string; label?: string; exact?: boolean };
-  barCategories?: { label: string; total: number; rate: string }[];
+  barCategories?: { label: string; total: number; rate: string; detailLabel?: string }[];
+  countAxis?: boolean;
   onReset(): void;
   resetDisabled?: boolean;
   resetting?: boolean;
   resetTitle?: string;
   controls?: ReactNode;
-  footer?: ReactNode;
+  optionDetails?: ReactNode;
   empty?: string;
   references?: { value: number; label: string }[];
   yDomain?: [number, number];
 }
 const timeLabel = (at: number) => new Date(at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 export function MetricsChart(props: Props) {
-  const id = useId(), [expanded, setExpanded] = useState(false), [scale, setScale] = useState<'linear' | 'logY' | 'logX'>('linear'), [hidden, setHidden] = useState<string[]>([]);
-  const dialog = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!expanded) return;
-    const previous = document.activeElement, overflow = document.body.style.overflow;
-    document.body.style.overflow = 'hidden';
-    dialog.current?.focus();
-    return () => { document.body.style.overflow = overflow; if (previous instanceof HTMLElement) previous.focus({ preventScroll: true }); };
-  }, [expanded]);
+  const id = useId(), [scale, setScale] = useState<'linear' | 'logY' | 'logX'>('linear'), [hidden, setHidden] = useState<string[]>([]);
   const active = props.series.filter(line => !hidden.includes(line.key));
   const numbers = props.resetting ? [] : props.data.flatMap(point => active.map(line => point[line.key])).filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
   const positive = numbers.filter(value => value > 0);
@@ -57,55 +48,50 @@ export function MetricsChart(props: Props) {
   const timeTick = (at: number) => props.data.length > 1 && props.data[props.data.length - 1].at - props.data[0].at >= 86_400_000
     ? new Date(at).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : timeLabel(at);
   const axisColor = '#789087', labelColor = '#aabfb6';
-  const content = <section aria-labelledby={id} className={'flex min-h-0 min-w-0 flex-col rounded-2xl border border-[#263d33] bg-[#0b1914] p-5 text-slate-100 shadow-[0_8px_28px_rgba(0,0,0,0.12)] ' + (expanded ? 'fixed inset-6 z-[100] p-8' : 'h-[460px]')}>
-    <div className="mb-3 flex min-h-9 shrink-0 items-center justify-between gap-3">
-      <h3 id={id} className="text-xl font-semibold tracking-tight text-[#e8f3ed]">{props.title}</h3>
-      {props.currentValue && <div className="flex shrink-0 items-baseline gap-2 text-right tabular-nums" aria-label={props.currentValue.label || 'Current ' + props.title}>
-        <span className="text-2xl font-semibold text-cyan-200">{props.resetting || props.currentValue.amount === null ? '—' : props.currentValue.exact ? props.currentValue.amount.toLocaleString() : metricFormat(props.currentValue.amount)}</span><span className="text-base text-[#aabfb6]">{props.currentValue.unit}</span>
+  return <section aria-labelledby={id} className="flex h-[460px] min-h-0 min-w-0 flex-col rounded-2xl border border-[#263d33] bg-[#0b1914] p-5 text-slate-100 shadow-[0_8px_28px_rgba(0,0,0,0.12)]">
+    <div className="mb-4 flex min-h-11 shrink-0 items-center gap-3">
+      <h3 id={id} className="min-w-0 flex-1 truncate text-xl font-semibold tracking-tight text-[#e8f3ed]" title={props.title}>{props.title}</h3>
+      {props.currentValue && <div className="flex shrink-0 flex-col text-right tabular-nums" aria-label={props.currentValue.label || 'Current ' + props.title}>
+        <span className="text-xl font-semibold leading-tight text-cyan-200">{props.resetting || props.currentValue.amount === null ? '—' : props.currentValue.exact ? props.currentValue.amount.toLocaleString() : metricFormat(props.currentValue.amount)}</span><span className="text-sm text-[#aabfb6]">{props.currentValue.unit}</span>
       </div>}
-    </div>
-    <div className="mb-3 flex min-h-12 shrink-0 items-center gap-2">
-    <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto pb-1">
-      {props.controls}
+      <MetricsMenu label={props.title + ' options'} trigger={<SlidersHorizontal size={18} />}>
+      <div className="flex flex-wrap items-center gap-3">{props.controls}</div>
       {(props.logarithmic || props.logarithmicX) && <MetricsSelect label="Graph scale" value={useLog ? 'logY' : useLogX ? 'logX' : 'linear'} onChange={value => setScale(value === 'logX' ? 'logX' : value === 'logY' ? 'logY' : 'linear')}
-        className="w-24" options={[{ value: 'linear', label: 'Linear' }, ...(props.logarithmicX ? [{ value: 'logX', label: 'Log X', disabled: !xValues.length }] : []), ...(props.logarithmic ? [{ value: 'logY', label: props.logarithmicX ? 'Log Y' : 'Log', disabled: hasNegative || !positive.length }] : [])]} />}
-      {props.series.length > 1 && <MetricsMenu label="Graph series" trigger={<ListFilter size={18} />}>
-        <div className="max-h-64 overflow-auto">{props.series.map(line => <label key={line.key} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-base hover:bg-[#1a3228]">
+        className="w-full max-w-none" options={[{ value: 'linear', label: 'Linear scale' }, ...(props.logarithmicX ? [{ value: 'logX', label: 'Log X', disabled: !xValues.length }] : []), ...(props.logarithmic ? [{ value: 'logY', label: props.logarithmicX ? 'Log Y' : 'Log scale', disabled: hasNegative || !positive.length }] : [])]} />}
+      {props.series.length > 1 && <div className="max-h-64 overflow-auto border-t border-[#30433f] pt-2" aria-label="Graph series">{props.series.map(line => <label key={line.key} className="flex cursor-pointer items-center gap-3 rounded-lg px-2 py-2 text-base hover:bg-[#1a3228]">
           <input type="checkbox" className="accent-emerald-400" checked={!hidden.includes(line.key)} onChange={() => setHidden(hidden.includes(line.key) ? hidden.filter(key => key !== line.key) : [...hidden, line.key])} />
           <span className="size-2 shrink-0 rounded-full" style={{ background: line.color }} /><span className="truncate">{line.label}</span>
-        </label>)}</div>
-      </MetricsMenu>}
-    </div>
-    <div className="flex shrink-0 items-center gap-2">
-      <button className={metricsIconControl} aria-label={props.resetTitle || 'Permanently reset ' + props.title + ' history'} title={props.resetTitle || 'Reset stored data'} disabled={props.resetDisabled || props.resetting} onClick={props.onReset}>{props.resetting ? <LoaderCircle size={18} className="animate-spin" /> : <RotateCcw size={18} />}</button>
-      <button className={metricsIconControl} aria-label={(expanded ? 'Close expanded ' : 'Expand ') + props.title} title={expanded ? 'Close' : 'Expand'} onClick={() => setExpanded(!expanded)}>{expanded ? <X size={18} /> : <Expand size={18} />}</button>
-    </div>
+        </label>)}</div>}
+      {props.optionDetails}
+      <div className="border-t border-[#30433f] pt-3">
+        <button className={metricsControl + ' w-full'} aria-label={props.resetTitle || 'Permanently reset ' + props.title + ' history'} title={props.resetTitle || 'Reset stored data'} disabled={props.resetDisabled || props.resetting} onClick={props.onReset}>{props.resetting ? <LoaderCircle size={18} className="animate-spin" /> : <RotateCcw size={18} />}{props.resetting ? 'Resetting…' : 'Reset graph'}</button>
+      </div>
+      </MetricsMenu>
     </div>
     <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
     <div className="h-full" style={props.barCategories ? { minWidth: Math.max(300, props.barCategories.length * 132 + 100) } : undefined}>
       {!numbers.length ? <div className="grid h-full place-items-center text-base text-[#789087]">{props.resetting ? 'Resetting…' : props.empty || (active.length ? 'No data' : 'Select a series')}</div> : <ResponsiveContainer width="100%" height="100%" minWidth={0}>
-        <ComposedChart data={plotted} layout={props.categoryAxis ? 'vertical' : 'horizontal'} margin={{ top: props.barCategories ? 34 : 10, right: 14, bottom: props.barCategories ? 6 : 34, left: 12 }} accessibilityLayer>
-          <CartesianGrid stroke="#23392e" strokeDasharray="3 5" />
+        <ComposedChart data={plotted} layout={props.categoryAxis ? 'vertical' : 'horizontal'} margin={{ top: props.barCategories ? 34 : 10, right: 14, bottom: 6, left: 12 }} accessibilityLayer>
+          <CartesianGrid stroke="#23392e" horizontal={!props.categoryAxis} vertical={!!props.categoryAxis} />
           {props.barCategories ? <>
-            <XAxis dataKey="at" type="category" interval={0} height={78} stroke={axisColor} axisLine={false} tickLine={false}
-              label={{ value: props.xLabel || 'Monster', position: 'insideBottom', offset: -2, fill: labelColor, fontSize: 15 }}
+            <XAxis dataKey="at" type="category" interval={0} height={58} stroke={axisColor} axisLine={false} tickLine={false}
               tick={input => {
                 const category = props.barCategories?.[Number(input.payload?.value)];
                 if (!category) return <g />;
                 return <g transform={'translate(' + input.x + ',' + input.y + ')'}>
                   <text y={18} textAnchor="middle" fill={labelColor} fontSize={14}><title>{category.label}</title>{category.label.length > 17 ? category.label.slice(0, 16) + '…' : category.label}</text>
-                  <text y={39} textAnchor="middle" fill="#e8f3ed" fontSize={14} fontWeight={600}><title>Total recorded kills in retained history</title>Total {category.total.toLocaleString()}</text>
+                  <text y={39} textAnchor="middle" fill="#e8f3ed" fontSize={14} fontWeight={600}><title>{category.total.toLocaleString()}</title>{category.detailLabel || 'Total'} {category.detailLabel === 'Damage' ? metricFormat(category.total) : category.total.toLocaleString()}</text>
                 </g>;
               }} />
             <YAxis scale={useLog ? 'log' : 'linear'} domain={useLog ? [10 ** low, 10 ** high] : [0, Math.max(1, numbers.reduce((maximum, value) => Math.max(maximum, value), 0))]}
-              allowDecimals={false} ticks={ticks} tickFormatter={metricFormat} tick={{ fontSize: 14 }} stroke={axisColor} tickLine={false} axisLine={false} width={78}
+              allowDecimals={props.countAxis === false} ticks={ticks} tickFormatter={metricFormat} tick={{ fontSize: 14 }} stroke={axisColor} tickLine={false} axisLine={false} width={78}
               label={{ value: props.yLabel, angle: -90, position: 'insideLeft', fill: labelColor, fontSize: 15, offset: -6 }} />
           </> : props.categoryAxis ? <>
-            <XAxis type="number" tickFormatter={metricFormat} stroke={axisColor} tickLine={false} axisLine={false} tick={{ fontSize: 14 }} label={{ value: props.yLabel, position: 'insideBottom', offset: -25, fill: labelColor, fontSize: 15 }} />
-            <YAxis dataKey="at" type="category" tickFormatter={props.xFormat} stroke={axisColor} axisLine={false} tickLine={false} width={148} interval={0} tick={{ fontSize: 14 }} label={{ value: props.xLabel, angle: -90, position: 'insideLeft', fill: labelColor, fontSize: 15, offset: -8 }} />
+            <XAxis type="number" tickFormatter={metricFormat} stroke={axisColor} tickLine={false} axisLine={false} tick={{ fontSize: 14 }} />
+            <YAxis dataKey="at" type="category" tickFormatter={props.xFormat} stroke={axisColor} axisLine={false} tickLine={false} width={148} interval={0} tick={{ fontSize: 14 }} />
           </> : <>
             <XAxis dataKey="at" type="number" scale={useLogX ? 'log' : 'linear'} domain={xDomain || (props.data.length === 1 ? [props.data[0].at - 1, props.data[0].at + 1] : ['dataMin', 'dataMax'])} allowDecimals={props.type !== 'bar'} tickCount={5} tickFormatter={props.xFormat || timeTick}
-              stroke={axisColor} axisLine={false} tickLine={false} minTickGap={28} tick={{ fontSize: 14 }} label={{ value: props.xLabel || 'Time', position: 'insideBottom', offset: -25, fill: labelColor, fontSize: 15 }} />
+              stroke={axisColor} axisLine={false} tickLine={false} minTickGap={28} tick={{ fontSize: 14 }} />
             <YAxis scale={useLog ? 'log' : 'linear'} domain={useLog ? [10 ** low, 10 ** high] : props.yDomain || [hasNegative ? 'auto' : 0, 'auto']} ticks={ticks} tickCount={5} tickFormatter={metricFormat}
               stroke={axisColor} axisLine={false} tickLine={false} width={78} tick={{ fontSize: 14 }} label={{ value: props.yLabel, angle: -90, position: 'insideLeft', fill: labelColor, fontSize: 15, offset: -6 }} />
           </>}
@@ -120,17 +106,5 @@ export function MetricsChart(props: Props) {
       </ResponsiveContainer>}
     </div>
     </div>
-    <div className="mt-3 flex h-12 shrink-0 items-center border-t border-[#23392e] pt-2">
-      {props.footer || <div className="flex min-w-0 gap-4 overflow-x-auto text-base text-[#aabfb6]" aria-label="Graph legend">{active.map(line => <span key={line.key} className="flex shrink-0 items-center gap-2"><span className="size-2 rounded-full" style={{ background: line.color }} />{line.label}</span>)}</div>}
-    </div>
   </section>;
-  return expanded ? <><div className="h-[460px] rounded-2xl border border-[#263d33]" />{createPortal(<div ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-label={props.title} onKeyDown={event => {
-    if (event.key === 'Escape' && !event.defaultPrevented) setExpanded(false);
-    if (event.key !== 'Tab') return;
-    const controls = dialog.current?.querySelectorAll<HTMLElement>('button:not(:disabled), select:not(:disabled), input:not(:disabled), summary');
-    if (!controls?.length) return;
-    const first = controls[0], last = controls[controls.length - 1];
-    if (event.shiftKey && (document.activeElement === first || document.activeElement === dialog.current)) { event.preventDefault(); last.focus(); }
-    else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialog.current)) { event.preventDefault(); first.focus(); }
-  }}><div className="fixed inset-0 z-[99] bg-black/80 backdrop-blur-sm" onClick={() => setExpanded(false)} />{content}</div>, document.body)}</> : content;
 }

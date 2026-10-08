@@ -6,6 +6,7 @@ import type { PriceHistory, MerchantBlock } from "../commerce/market-types.ts";
 
 /** Saved maps owned by commerce and inventory command handlers. */
 export interface SavedServiceSettings {
+  autoConsumables?: import('../../consumables.ts').AutoConsumables;
   nativeStand?: NativeStandLedger;
   autoStandBuys?: boolean;
   autoBlacklistMerchants?: boolean;

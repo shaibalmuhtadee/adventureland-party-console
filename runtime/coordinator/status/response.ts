@@ -197,6 +197,7 @@ export function createHeartbeatResponse(state: HeartbeatState, ports: HeartbeatR
       ...Object.fromEntries(heartbeatStateFields.map((field) => [field, state[field]])),
       serverNow: ports.now(),
       travelCombat,
+      autoConsumable: state.autoConsumables?.[name] || null,
       ...realmErrors(name),
       command,
       rareControl: ports.rareControl(name),

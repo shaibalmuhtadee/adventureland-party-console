@@ -4,6 +4,7 @@ import { itemActionBanner } from "./item-action-banner";
 import { standIsFull } from "./stand-capacity";
 import type { StandBid } from "./stand-bid";
 import { isEquipment, isUsable } from "./item-actions";
+import { isRenewableConsumable } from '../../../runtime/consumables';
 import { itemMenuClass } from "./item-menu-style";
 import { canDeconstruct, type DeconstructionMark, type DeconstructionCatalog } from "./deconstruction";
 import { MerchantVisitControl } from "./merchant-visit-control";
@@ -128,6 +129,7 @@ export const InventoryPanel = memo(function InventoryPanel({
   onCommand,
   onTravel,
   restockValue,
+  autoConsumable,
   onSaveRestock,
   onNpcSale,
   onAutoNpcSale,
@@ -185,6 +187,7 @@ export const InventoryPanel = memo(function InventoryPanel({
       | "return-leader"
       | "equip"
       | "use-item"
+      | "auto-consumable"
       | "unequip"
       | "mark"
       | "merchant-mark"
@@ -210,6 +213,7 @@ export const InventoryPanel = memo(function InventoryPanel({
   ) => Promise<void>;
   onTravel: () => void;
   restockValue?: RestockPolicy;
+  autoConsumable?: string;
   onSaveRestock?: (character: string, value: RestockPolicy) => Promise<void>;
   onStand: (entry: InventoryEntry) => void;
   onNpcSale: (entry: InventoryEntry) => void;
@@ -689,6 +693,7 @@ export const InventoryPanel = memo(function InventoryPanel({
               const exchangeable =
                 character.name === merchant && Number(entry.meta?.definition.e || 0) > 0;
               const banner = itemActionBanner([
+                autoConsumable === entry.item.name && {action:'consumable',automatic:true,label:'Auto use',title:'Use again when the current elixir expires'},
                 !!deconstruction && {action:'deconstruction',label:'Deconstruction'},
                 !!npcSale && {action:'npc',label:'NPC sale',automatic:!!npcSale.auto,title:npcSaleDetails || undefined},
                 !!inventoryStatScrollMark && {action:'stat',label:'Stat scroll'},
@@ -773,6 +778,10 @@ export const InventoryPanel = memo(function InventoryPanel({
                     </ContextMenuItem>}
                     {isUsable(entry.meta?.definition) && <ContextMenuItem onClick={() => onCommand(character.name, "use-item", entry.item, {slot: entry.slot})}>
                       <FlaskConical className="mr-2 h-4 w-4" />{itemType === "elixir" ? "Use elixir" : "Use"}
+                    </ContextMenuItem>}
+                    {isRenewableConsumable(entry.meta?.definition) && <ContextMenuItem onClick={() => onCommand(character.name, "auto-consumable", entry.item, {slot: entry.slot, enabled: autoConsumable !== entry.item.name})}>
+                      <FlaskConical className="mr-2 h-4 w-4" />
+                      {autoConsumable === entry.item.name ? "Stop automatic use" : "Use automatically when expired"}
                     </ContextMenuItem>}
                     {isEquipment(entry.meta?.definition) && (comparisonSlots.length > 1 ? (
                       <ContextMenuSub>

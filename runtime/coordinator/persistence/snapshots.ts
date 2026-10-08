@@ -105,6 +105,7 @@ export const settingsFields = [
   "townCycle",
   "returnProgress",
   "restockPolicies",
+  "autoConsumables",
   "merchantCharacter",
   "merchantForceStand",
   "merchantEventCombatEnabled",

@@ -1,14 +1,13 @@
 'use client';
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { SlidersHorizontal } from 'lucide-react';
 import type { MetricsResponse } from '../../../runtime/metrics/contracts.ts';
 import { encouragementLuck, projectDirectDrop } from '../../../runtime/metrics/luck.ts';
 import type { MerchantCatalog } from './merchant-catalog';
 import type { Char } from './char';
 import { characterKey } from './character-cache';
 import { MetricsChart, metricFormat } from './metrics-chart';
-import { MetricsMenu, MetricsSelect, metricsControl } from './metrics-controls';
+import { MetricsSelect, metricsControl } from './metrics-controls';
 import { MetricsItemPicker } from './metrics-item-picker';
 import { observedMonsterRate, selectMetricRows, type GraphPoint } from './metrics-series';
 import { effectiveDropRate } from './drop-rate';
@@ -81,7 +80,7 @@ export function MetricsDropEstimator({ data, catalog, characters, server, live }
     <label className="grid min-w-0 gap-1.5 text-sm font-medium text-[#91aa9d]" title={title}>{label}<input className={metricsControl + ' w-full justify-start tabular-nums'} type="number" min={min} max={max} step="any" value={value} placeholder={placeholder} onChange={event => change(event.target.value)} /></label>;
   const milestones = [{ label: 'Mean', kills: average }, { label: '50%', kills: threshold(.5) }, { label: '90%', kills: threshold(.9) }, { label: target + '%', kills: targetKills }];
   return <MetricsChart title="Item drop estimate" data={curve} series={[{ key: 'probability', label: 'At least one drop', color: '#4ade80' }]} onReset={reset} resetTitle="Reset estimate and options" logarithmic logarithmicX
-    yLabel="Chance (%)" yDomain={[0, 100]} xLabel={hours ? 'Hours' : 'Kills'} xFormat={metricFormat}
+    yLabel="Chance (%)" yDomain={[0, 100]} xFormat={value => metricFormat(value) + (hours ? ' h' : ' kills')}
     references={[50, 90, 95].map(value => ({ value, label: value + '%' }))}
     empty={!selected ? 'Choose an item' : !supported ? 'Unsupported drop source' : !valid ? 'Set luck in options' : hours && !rateValid ? 'Set kills per hour' : 'No drop chance'}
     controls={<>
@@ -89,8 +88,9 @@ export function MetricsDropEstimator({ data, catalog, characters, server, live }
       <MetricsSelect label="Drop source" className="w-28" value={String(sourceIndex)} onChange={value => setSourceIndex(Number(value))}
         options={sources.length ? sources.map((source, index) => ({ value: String(index), label: source.monsterName })) : [{ value: '0', label: 'Source' }]} />
       <MetricsSelect label="X-axis unit" className="w-20" value={hours ? 'hours' : 'kills'} onChange={value => setHours(value === 'hours')} options={[{ value: 'kills', label: 'Kills' }, { value: 'hours', label: 'Hours', disabled: !rateValid }]} />
-      <MetricsMenu label="Drop estimate options" trigger={<SlidersHorizontal size={15} />}>
-        <div className="grid grid-cols-2 gap-x-3 gap-y-4">
+    </>}
+    optionDetails={<>
+        <div className="grid grid-cols-2 gap-x-3 gap-y-4 border-t border-[#30433f] pt-3">
           <label className="col-span-2 grid gap-1.5 text-sm font-medium text-[#91aa9d]">Luck character
             <MetricsSelect label="Luck character" className="w-full max-w-none justify-start" value={luckCharacter} onChange={setLuckCharacter} options={[{ value: '', label: 'Automatic' }, ...data.characters.map(name => ({ value: name, label: name }))]} />
           </label>
@@ -106,10 +106,8 @@ export function MetricsDropEstimator({ data, catalog, characters, server, live }
           <div className="grid content-center gap-1.5 text-sm text-[#91aa9d]"><span>Expected / 1,000 kills</span><span className="text-base font-semibold tabular-nums text-slate-100">{projection ? metricFormat(1000 * projection.expectedRewards * (source?.quantity || 1)) : '—'}</span></div>
         </div>
         <div className="mt-4 flex items-center justify-between border-t border-[#30433f] pt-3 text-sm text-[#91aa9d]"><span className="truncate">{selectedName || 'No character'}</span><span className="shrink-0 text-emerald-300">{metricFormat(encouragement)}× Encouragement</span></div>
-      </MetricsMenu>
-    </>}
-    footer={<div className="grid w-full grid-cols-4 gap-3">{milestones.map((value, index) => <div key={index} className="min-w-0">
+    <div className="grid w-full grid-cols-2 gap-3 border-t border-[#30433f] pt-3">{milestones.map((value, index) => <div key={index} className="min-w-0">
       <span className="block text-sm font-medium text-[#789087]">{value.label}</span>
       <span className="mt-0.5 block truncate text-base font-semibold tabular-nums text-[#d6e9de]">{value.kills === null ? '—' : metricFormat(hours && rateValid ? value.kills / rate : value.kills)}<span className="ml-1 text-sm font-normal text-[#789087]">{hours ? 'h' : 'kills'}</span></span>
-    </div>)}</div>} />;
+    </div>)}</div></>} />;
 }

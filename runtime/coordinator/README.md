@@ -9,6 +9,15 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+Timed elixir inventory menus offer **Use automatically when expired** and
+**Stop automatic use**. Each character saves one selected consumable by item ID;
+the native runtime consumes it when the elixir slot is empty or expired, yielding
+to inventory work and retaining the choice when stock runs out. An active elixir
+is never replaced. Emergency inventory cleanout retains the selected stock.
+Publish character, coordinator and dashboard assets with the full supported
+restart. Manual verification should cover Pumpkin Spice use, expiry renewal,
+slot movement, depleted stock, disabling and restart persistence.
+
 Character cards expose per-character Inventory swaps. See
 [Inventory swaps](../../docs/inventory-swaps.md) for configuration, native batch
 ownership, restoration recovery, and manual verification. Activate this feature

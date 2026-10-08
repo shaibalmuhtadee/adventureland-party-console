@@ -3,6 +3,7 @@ import { errorReason } from '../roles/types.ts';
 import { blocked, cost, reserve, unlocked } from './eligibility.ts';
 import { bestAttack, damageChoices } from './offense.ts';
 import { rogueKnifeAttack } from '../farming/rogue-knives.ts';
+import { halloweenKnifeAttack, halloweenKnifePriority } from './halloween-knives.ts';
 import { absorbDecision, paladinSupport, rogueSupport, combatBuffSupport, opener } from './protection.ts';
 import type { Combatant, SkillDecision, SkillDiagnostic, SkillId, SkillWorld } from './types.ts';
 
@@ -107,6 +108,8 @@ export function createSkillEngine(ports: SkillPorts) {
     },
     offense(target: Combatant) {
       const w = world();
+      // Preserve mana for tagging the wave instead of spending it on one add.
+      if (halloweenKnifePriority(w)) return Promise.resolve(false);
       if (!!w.context.farmingScript) return Promise.resolve(false);
       return first(damageChoices(w, target));
     },
@@ -118,6 +121,12 @@ export function createSkillEngine(ports: SkillPorts) {
         const d = rogueKnifeAttack(w);
         // A resolved false still owns this attack slot, preventing basic fallback.
         return d ? execute(d) : Promise.resolve(false);
+      }
+      if (halloweenKnifePriority(w)) {
+        const knives = halloweenKnifeAttack(w);
+        // Basic attacks are sent just ahead of the shared cooldown deadline.
+        // Keep that slot for knives until their native cooldown is ready.
+        return knives && affordable(w, knives) ? execute(knives) : Promise.resolve(false);
       }
       const opening = opener(w, target);
       if (opening && affordable(w, opening)) {

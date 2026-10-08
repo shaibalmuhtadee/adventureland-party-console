@@ -70,6 +70,14 @@ export interface MetricsKillsResponse {
   monsters: MonsterKillSummary[];
   lastReceivedAt: number | null;
 }
+export interface MetricBarSummary { id: string; amount: number; total: number; today: number }
+interface MetricsBarsFields {
+  version: 1; from: number; to: number; elapsedMs: number;
+  dayFrom: number; dayTo: number; resetAt: number; rows: MetricBarSummary[];
+  characters: string[]; monsters: string[]; skills: string[]; items: string[];
+  lastReceivedAt: number | null;
+}
+export type MetricsBarsResponse = MetricsBarsFields & ({ metric: 'damage'; by: 'character' | 'skill' } | { metric: 'loot'; by: 'item' });
 export const METRIC_RESET_KINDS = ['kills', 'damage', 'gold', 'loot', 'ping'] as const;
 export type MetricResetKind = typeof METRIC_RESET_KINDS[number];
 export type MetricResets = Partial<Record<MetricResetKind, number>>;

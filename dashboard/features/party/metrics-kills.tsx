@@ -56,7 +56,7 @@ export function MetricsKills(props: Props) {
       rate: (rate === null ? '—' : new Intl.NumberFormat(undefined, { maximumSignificantDigits: 3, notation: rate >= 10000 ? 'compact' : 'standard' }).format(rate)) + unit.suffix };
   });
   return <MetricsChart title="Kills" data={monsters.map((row, at) => ({ at, kills: row.count }))} series={[{ key: 'kills', label: 'Kills in selected range', color: '#22d3ee' }]}
-    yLabel="Kills" xLabel="Monster" xFormat={value => labels[Math.round(value)]?.label || ''} type="bar" barCategories={labels} logarithmic
+    yLabel="Kills" xFormat={value => labels[Math.round(value)]?.label || ''} type="bar" barCategories={labels} logarithmic
     currentValue={{ amount: data && !query.isError ? daily : null, unit: 'today', label: 'Total kills today', exact: true }}
     onReset={props.onReset} resetDisabled={props.resetDisabled} resetting={props.resetting} resetTitle={props.resetTitle}
     empty={query.isError ? 'Kills unavailable' : query.isPending ? 'Loading…' : 'No recorded kills'}

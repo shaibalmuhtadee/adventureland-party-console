@@ -4,6 +4,7 @@ import {
   isItemCollection,
   merchantCollectionNearby,
   markedCollectionReady,
+  freshCollectionStatus,
 } from "./collection.ts";
 import { coordinatorMerchantPriority, coordinatorMerchantTransferBlocked } from "./job-policy.ts";
 import { selectMerchantJob, stampMerchantJob } from "./priority.ts";
@@ -48,7 +49,7 @@ export function coordinatorCollectionNearby(
   );
 }
 
-/** A small collection may proceed only when current nearby status makes another trip unnecessary. */
+/** Automatic party collections require inventory pressure even when the merchant is nearby. */
 export function coordinatorCollectionReady(
   state: CollectionState,
   job: PrioritizedJob,
@@ -56,6 +57,11 @@ export function coordinatorCollectionReady(
 ): boolean {
   if (merchantMovementBlocked(state, job)) return false;
   const reason = pickupReason(job.reason, job.target, state.merchantCharacter);
+  if (job.manual !== true && ['marked items', 'inventory cleanout', 'party collection'].includes(reason)) {
+    const target = state.statuses[String(job.target)];
+    if (!freshCollectionStatus(target, now()) || !Array.isArray(target?.items)) return false;
+    if (target.items.filter(entry => !entry).length > 7) return false;
+  }
   if (!isItemCollection(reason)) return true;
   return markedCollectionReady(
     reason,

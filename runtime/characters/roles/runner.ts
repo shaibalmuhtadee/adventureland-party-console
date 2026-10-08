@@ -3,6 +3,7 @@ import {installCombatTrace} from "../../combat/trace.ts";
 import {createEntityRefresh} from "../../combat/entity-refresh.ts";
 import { installPorcupineEquipment } from "./porcupine-equipment-runtime.ts";
 import { installItemSwaps } from './item-swaps-runtime.ts';
+import { installAutoConsumable } from './auto-consumable.ts';
 import { merchantAnniversaryControl } from "../../coordinator/merchant/anniversary-control.ts";
 import { createAttackController } from "./attack-controller.ts";
 import { installSkillRuntime } from '../skills/runtime.ts';
@@ -23,6 +24,7 @@ export function installRoleRunner(
   root.partyRoleRunner?.stop();
   let equipment: ReturnType<typeof installPorcupineEquipment> | null = null;
   let itemSwaps: ReturnType<typeof installItemSwaps> | null = null;
+  let autoConsumable: ReturnType<typeof installAutoConsumable> | null = null;
   function resolvedRole(): Role {
     return { ...defaultRole, ...classRole };
   }
@@ -332,6 +334,7 @@ export function installRoleRunner(
       skills = installSkillRuntime(root);
       equipment = installPorcupineEquipment(root);
       itemSwaps = installItemSwaps(root);
+      autoConsumable = installAutoConsumable(root);
       game_log(character.name + " loaded generic " + resolvedRole().name + " behavior", "#51D2E1");
       active = true;
       root.partyCombatState = { at: Date.now(), stage: "start", error: null };
@@ -361,6 +364,7 @@ export function installRoleRunner(
       skills?.stop();
       equipment?.stop();
       itemSwaps?.stop();
+      autoConsumable?.stop();
       queueClient?.stop();queueMarkers?.stop();
       lootClient?.stop();trace?.stop();
       active = false;

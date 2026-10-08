@@ -29,6 +29,19 @@ boss. Their appearance replaces an engaged Mr. Pumpkin target; once no eligible
 instance and do not change the coordinator's committed encounter or travel route.
 Merchants retain the requirement that another character holds their target's aggro.
 
+A rogue with no other non-merchant members in the actual party engages Mr. Pumpkin
+or Mr. Green only while that boss targets another character. Off-map party members
+still count. Preparation before a spawn remains available; an untargeted boss or
+one targeting the rogue pauses approach and boss damage until another tank takes
+over. The rule covers basic attacks and offensive skills, including Fan of Knives.
+
+During Mr. Pumpkin combat, rogues use Fan of Knives on every ready attack in the
+77–72%, 52–47%, and 27–22% HP windows around his add spawns. Nearby `jr` take the
+first target slots, with Mr. Pumpkin filling a remaining slot, up to the native
+target limit. Knives continue while eligible `jr` remain in skill range, then
+ordinary boss damage resumes outside those windows. Equipment, mana reserve,
+immunity, and the shared attack cooldown still apply.
+
 The merchant's Events dropdown has an **Attack during events** checkbox, off by
 default. It controls combat attendance for all selected events, including
 Halloween, while preserving those selections. Enable it when the merchant is

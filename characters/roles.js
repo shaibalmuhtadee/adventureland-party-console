@@ -9,7 +9,7 @@
       return await sharedRoutine.energizeLowestMana(0.35);
     },
     usePotion: async function() {
-      return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.2, priority: "hp" });
+      return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" });
     }
   };
 
@@ -32,7 +32,7 @@
       return await sharedRoutine.skillSupport?.() ?? false;
     },
     usePotion: async function() {
-      return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.2, priority: "hp" });
+      return await sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" });
     },
     beforeAttack: async function(target) {
       if (sharedRoutine.getFarmingMode() === "scatter") return false;
@@ -334,6 +334,7 @@
         await memory.pending;
       },
       busy: () => !!memory.pending,
+      ownsHands: () => !!memory.session,
       stop() {
         active = false;
       }
@@ -377,6 +378,1166 @@
         }
       }
     }, memory);
+  }
+
+  // runtime/item-swaps.ts
+  var swapSlots = [
+    "helmet",
+    "chest",
+    "pants",
+    "gloves",
+    "shoes",
+    "cape",
+    "belt",
+    "amulet",
+    "orb",
+    "ring1",
+    "ring2",
+    "earring1",
+    "earring2",
+    "mainhand",
+    "offhand"
+  ];
+  function swapIdentity(item) {
+    return {
+      name: item.name,
+      level: item.level || 0,
+      p: item.p ?? void 0,
+      stat_type: item.stat_type ?? void 0,
+      data: item.data,
+      rid: item.rid ?? void 0
+    };
+  }
+  function sameSwapItem(a, b) {
+    if (!a || !b) return !a && !b;
+    const x = swapIdentity(a), y = swapIdentity(b);
+    return x.name === y.name && x.level === y.level && x.p === y.p && x.stat_type === y.stat_type && x.rid === y.rid && JSON.stringify(x.data) === JSON.stringify(y.data);
+  }
+  function isSwapSlot(value) {
+    return swapSlots.some((slot) => slot === value);
+  }
+  function object(value) {
+    return !!value && typeof value === "object" && !Array.isArray(value);
+  }
+  function validSwapItem(value) {
+    return object(value) && typeof value.name === "string" && value.name.length > 0 && (value.level === void 0 || typeof value.level === "number" && Number.isSafeInteger(value.level) && value.level >= 0) && ["p", "stat_type", "rid"].every((key) => value[key] == null || typeof value[key] === "string");
+  }
+  function itemSwapSlots(type) {
+    if (type === "ring") return ["ring1", "ring2"];
+    if (type === "earring") return ["earring1", "earring2"];
+    if (type === "weapon") return ["mainhand", "offhand"];
+    if (["shield", "source", "quiver", "offhand"].includes(String(type))) return ["offhand"];
+    return isSwapSlot(type) ? [type] : [];
+  }
+
+  // runtime/characters/roles/item-swap-controller.ts
+  function validSwapSession(value) {
+    if (!value || typeof value !== "object" || !("strategy" in value) || value.strategy !== "luck-before-kill" || !("target" in value) || typeof value.target !== "string" || !("threshold" in value) || typeof value.threshold !== "number" || !("configuration" in value) || typeof value.configuration !== "string" || !("phase" in value) || !["equipping", "equipped", "restoring"].includes(String(value.phase)) || !("slots" in value) || !Array.isArray(value.slots)) return false;
+    return value.slots.every((entry) => entry && typeof entry === "object" && isSwapSlot(entry.slot) && (entry.original === null || validSwapItem(entry.original)) && (entry.desired === null || validSwapItem(entry.desired)) && Number.isInteger(entry.inventorySlot)) && new Set(value.slots.map((entry) => entry.slot)).size === value.slots.length;
+  }
+  function createItemSwapController(ports, memory) {
+    let active = true;
+    function checkpoint(session) {
+      ports.save(session);
+    }
+    function run(operation) {
+      if (!active || memory.pending || ports.now() < (memory.retryAt || 0)) return;
+      const pending = operation().catch((error) => {
+        memory.retryAt = ports.now() + 1500;
+        ports.report({
+          phase: "blocked",
+          strategy: memory.session?.strategy,
+          target: memory.session?.target,
+          error: String(error && typeof error === "object" && "message" in error ? error.message : error)
+        });
+      }).finally(() => {
+        if (memory.pending === pending) delete memory.pending;
+      });
+      memory.pending = pending;
+    }
+    function find(item, preferred, used) {
+      const items = ports.inventory();
+      const index = !used.has(preferred) && sameSwapItem(items[preferred], item) ? preferred : items.findIndex((candidate, i) => !used.has(i) && sameSwapItem(candidate, item));
+      if (index < 0) throw Error("Swap gear missing from inventory: " + item.name);
+      used.add(index);
+      return index;
+    }
+    async function apply(session, restoring) {
+      const field = restoring ? "original" : "desired";
+      const used = /* @__PURE__ */ new Set();
+      const entries = session.slots.filter((entry) => entry[field] && !sameSwapItem(ports.equipped(entry.slot), entry[field])).map((entry) => ({ num: find(entry[field], entry.inventorySlot, used), slot: entry.slot }));
+      for (const entry of session.slots) {
+        if (!entry[field] && ports.equipped(entry.slot)) {
+          if (!ports.inventory().some((item) => !item)) throw Error("Inventory space needed to restore empty equipment slot");
+          await ports.unequip(entry.slot);
+        }
+      }
+      if (entries.length) await ports.batch(entries);
+      const deadline = ports.now() + 1e3;
+      while (ports.now() < deadline && session.slots.some((entry) => !sameSwapItem(ports.equipped(entry.slot), entry[field])))
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      const failed = session.slots.filter((entry) => !sameSwapItem(ports.equipped(entry.slot), entry[field]));
+      if (failed.length) throw Error("Equipment batch incomplete: " + failed.map((entry) => entry.slot).join(", "));
+    }
+    async function restore(session) {
+      session.phase = "restoring";
+      checkpoint(session);
+      ports.report({ phase: "restoring", strategy: session.strategy, target: session.target });
+      session.slots = session.slots.filter((entry) => sameSwapItem(ports.equipped(entry.slot), entry.original) || sameSwapItem(ports.equipped(entry.slot), entry.desired));
+      checkpoint(session);
+      await apply(session, true);
+      ports.save(null);
+      delete memory.session;
+      ports.report({ phase: "idle" });
+    }
+    async function restoreForActivity() {
+      await memory.pending;
+      const session = memory.session;
+      if (!session) return;
+      memory.retryAt = 0;
+      const pending = restore(session);
+      memory.pending = pending;
+      try {
+        await pending;
+      } finally {
+        if (memory.pending === pending) delete memory.pending;
+      }
+    }
+    return {
+      tick(swaps, trigger, allowed) {
+        if (!active || memory.pending) return;
+        const winner = allowed ? swaps.find((swap) => swap.enabled && swap.items.length && trigger(swap)) : void 0;
+        const next = winner && trigger(winner);
+        const session = memory.session;
+        if (session) {
+          if (session.phase !== "equipped" || !winner || winner.strategy !== session.strategy || JSON.stringify(winner) !== session.configuration || !next)
+            run(() => restore(session));
+          else if (next.target !== session.target) {
+            session.target = next.target;
+            session.threshold = next.threshold;
+            checkpoint(session);
+            ports.report({ phase: "equipped", strategy: session.strategy, target: session.target, threshold: session.threshold });
+          }
+          return;
+        }
+        if (!winner || !next || memory.suppressed === next.target) return;
+        run(async () => {
+          const created = ports.prepare(winner, next);
+          memory.session = created;
+          checkpoint(created);
+          ports.report({ phase: "equipping", strategy: created.strategy, target: created.target, threshold: created.threshold });
+          try {
+            await apply(created, false);
+            created.phase = "equipped";
+            checkpoint(created);
+            ports.report({ phase: "equipped", strategy: created.strategy, target: created.target, threshold: created.threshold });
+          } catch (error) {
+            created.phase = "restoring";
+            checkpoint(created);
+            throw error;
+          }
+        });
+      },
+      async manual() {
+        if (memory.session) memory.suppressed = memory.session.target;
+        await restoreForActivity();
+      },
+      restoreForActivity,
+      reserved(item) {
+        return !!memory.session?.slots.some((entry) => sameSwapItem(item, entry.original) || sameSwapItem(item, entry.desired));
+      },
+      busy: () => !!memory.pending,
+      ownsEquipment: () => !!memory.session,
+      stop() {
+        active = false;
+      }
+    };
+  }
+
+  // runtime/characters/skills/budget.ts
+  function createManaBudget() {
+    let last = null;
+    let credit = 0;
+    const recovery = [];
+    return {
+      observe(now, mp, surplus, cap) {
+        if (!last) credit = cap;
+        else {
+          const recovered = Math.max(0, mp - last.mp);
+          if (recovered) recovery.push({ at: now, amount: recovered });
+          while (recovery.length && recovery[0].at < now - 3e4) recovery.shift();
+          const rate = recovery.reduce((sum, r) => sum + r.amount, 0) / 30 + Math.max(0, surplus) / 30;
+          credit += Math.max(0, Math.min(30, (now - last.at) / 1e3)) * rate;
+        }
+        credit = Math.min(Math.max(0, cap), credit);
+        last = { at: now, mp };
+        return credit;
+      },
+      debit(amount) {
+        credit = Math.max(0, credit - amount);
+      },
+      reset() {
+        last = null;
+        credit = 0;
+        recovery.length = 0;
+      }
+    };
+  }
+
+  // runtime/characters/roles/types.ts
+  function errorReason(error) {
+    if (error && typeof error === "object") {
+      if ("reason" in error && typeof error.reason === "string") return error.reason;
+      if ("message" in error && typeof error.message === "string") return error.message;
+    }
+    return String(error);
+  }
+
+  // runtime/characters/skills/types.ts
+  var health = (actor) => actor.hp / Math.max(1, actor.max_hp);
+  var decision = (skill, targets = [], category = "damage", reason = skill) => ({ skill, targets, category, reason });
+
+  // runtime/characters/skills/damage.ts
+  function rawDamage(w, id, target) {
+    const s = w.skills[id];
+    if (id === "shield_slam") return shieldDamage(w);
+    if (id === "purify") return (s?.damage || 2e3) + purifiable(w, target).length * 400;
+    return s?.damage ?? w.actor.attack * (s?.damage_multiplier ?? 1);
+  }
+  function purifiable(w, target) {
+    return Object.keys(target.s).filter((id) => {
+      const c = w.condition(id);
+      return target.s[id]?.citizens || (c?.buff || c?.debuff) && !c?.persistent;
+    });
+  }
+  function shieldDamage(w) {
+    const s = w.skills.shield_slam;
+    return w.actor.attack * (s?.damage_multiplier || 3) + Math.min(Math.max(0, w.actor.armor), s?.armor_cap || 1e3) * (s?.armor_multiplier || 12);
+  }
+  function mitigation(w, id, target) {
+    const s = w.skills[id];
+    const type = id === "attack" ? w.actor.damage_type : s?.damage_type;
+    if (type === "pure") return 1;
+    const defense = type === "magical" ? Number(target.resistance) - Number(w.actor.rpiercing || 0) : Number(target.armor) - Number(w.actor.apiercing || 0) - Number(s?.apiercing || 0);
+    return w.damageMultiplier(Number.isFinite(defense) ? defense : 0);
+  }
+  function damage(w, id, target, minimum = false) {
+    const s = w.skills[id];
+    let result = rawDamage(w, id, target);
+    if (!minimum && (id === "attack" || s?.procs)) result *= criticalMultiplier(w);
+    result += stackDamage(w, target);
+    result *= mitigation(w, id, target) * targetMultiplier(w, target);
+    return minimum ? result * 0.9 : result;
+  }
+  function stackDamage(w, target) {
+    return w.actor.ctype === "rogue" ? Math.min(w.skills.stack?.max || 2e3, (target.s.stack?.s || 0) + 1) : 0;
+  }
+  function targetMultiplier(w, target) {
+    const fortitude = Number(Reflect.get(target, "for")) || 0;
+    const amp = Number(Reflect.get(target, "incdmgamp")) || 0;
+    return w.damageMultiplier(fortitude * 5) * (1 + amp / 100);
+  }
+  function criticalMultiplier(w) {
+    return 1 + Math.min(1, (w.actor.crit || 0) / 100) * ((w.actor.critdamage || 0) / 100 + 1);
+  }
+  var usefulDamage = (w, id, target) => Math.min(Math.max(0, target.hp - w.incoming(target)), damage(w, id, target));
+  function incomingDps(w, actor, extraTarget) {
+    return w.context.monsters.filter((m) => m.target === actor.name || !!extraTarget && m.target === extraTarget).reduce((sum, m) => {
+      if (!Number.isFinite(m.attack) || !Number.isFinite(m.frequency)) return Infinity;
+      const defense = m.damage_type === "magical" ? actor.resistance : actor.armor;
+      return sum + m.attack * Number(m.frequency) * w.damageMultiplier(Number(defense) || 0) * 1.1;
+    }, 0);
+  }
+  function safeTransfer(w, source, fraction = 1) {
+    if (w.now - w.context.observedAt > 1500) return false;
+    const current = incomingDps(w, w.actor);
+    const added = fraction === 1 ? incomingDps(w, w.actor, source.name) - current : incomingDps(w, source) * fraction;
+    return w.actor.hp - 2 * (current + added) > w.actor.max_hp * 0.3;
+  }
+  function endangered(w, ally) {
+    const dps = incomingDps(w, ally);
+    return dps > 0 && (health(ally) < 0.6 || ally.hp - 2 * dps < ally.max_hp * 0.3);
+  }
+
+  // runtime/characters/skills/eligibility.ts
+  function cost(w, id) {
+    const mp = id === "heal" ? w.actor.mp_cost : w.skills[id]?.mp;
+    return Math.ceil(Math.max(0, Number(mp) || 0) * (1 - Math.min(100, Math.max(0, w.actor.mp_reduction || 0)) / 100));
+  }
+  function equipment(w, s) {
+    const main = w.actor.slots.mainhand, off = w.actor.slots.offhand;
+    const allowed = s.wtype ? [s.wtype].flat() : [];
+    const weapon = main ? w.item(main.name)?.wtype : void 0;
+    if (allowed.length && !allowed.includes(weapon || "")) return false;
+    if (!offhandMatches(w, s, off?.name)) return false;
+    return slotsMatch(w, s);
+  }
+  function offhandMatches(w, s, name) {
+    return !s.offhand_type || !!name && w.item(name)?.type === s.offhand_type;
+  }
+  function slotsMatch(w, s) {
+    return !s.slot || s.slot.some(([slot, name]) => {
+      const item = w.actor.slots[slot];
+      if (item?.name !== name) return false;
+      return (item.charges || 0) >= (w.item(name)?.charge || 0);
+    });
+  }
+  function unlocked(w, id) {
+    const s = w.skills[id];
+    if (!s || s.type === "passive" || s.consume) return false;
+    if (s.class && !s.class.includes(w.actor.ctype)) return false;
+    if (w.actor.level < (s.level || 0) || !equipment(w, s)) return false;
+    return Object.entries(s.requirements || {}).every(([key, value]) => Number(Reflect.get(w.actor, key)) >= Number(value));
+  }
+  function reserve(w) {
+    if (!!w.context.farmingScript) return 0;
+    const availableCost = (id) => unlocked(w, id) ? cost(w, id) : 0;
+    const c = w.actor.ctype;
+    if (c === "paladin") return Math.max(w.actor.max_mp * 0.3, 2 * availableCost("selfheal") + availableCost("guardians_oath"));
+    if (c === "priest") return Math.max(w.actor.max_mp * 0.35, 2 * cost(w, "heal") + availableCost("partyheal"));
+    if (c === "warrior") return (w.context.leader === w.actor.name ? availableCost("taunt") : 0) + Math.max(availableCost("stomp"), availableCost("hardshell"));
+    return w.actor.max_mp * 0.2;
+  }
+  function targetBlock(w, d) {
+    const s = w.skills[d.skill];
+    for (const target of d.targets) {
+      if (!living(target)) return "target dead";
+      if (s.no_self && target.name === w.actor.name) return "cannot target self";
+      if (!w.range(target, d.skill)) return "out of range";
+      if (s.hostile && !hostileAllowed(w, d, target)) return "unauthorized or immune target";
+    }
+    return safePull(w, d) ? null : "unsafe combined pull";
+  }
+  var living = (target) => !target.dead && !target.rip && target.hp > 0;
+  function hostileAllowed(w, d, target) {
+    return w.allowed(target, d.skill) && (!target.immune || !!w.skills[d.skill]?.pierces_immunity);
+  }
+  function safePull(w, d) {
+    if (w.context.mode !== "scatter" || !w.skills[d.skill]?.hostile) return true;
+    const pulled = new Set(d.targets.filter((t) => !t.target).map((t) => t.id));
+    if (!pulled.size) return true;
+    const context = { ...w.context, monsters: w.context.monsters.map((m) => pulled.has(m.id) ? { ...m, target: w.actor.name } : m) };
+    return w.actor.hp - incomingDps({ ...w, context }, w.actor) * 2 > w.actor.max_hp * 0.3;
+  }
+  function blocked(w, d, pending = 0) {
+    if (w.context.mode === "blocked" || w.actor.rip) return "combat activity blocked";
+    if (!ownsAggro(w, d)) return "leader owns aggro transfers";
+    if (!unlocked(w, d.skill)) return "level, equipment, or requirements";
+    const s = w.skills[d.skill];
+    if (w.cooldown(d.skill) || w.cooldown(s.share || d.skill)) return "cooldown";
+    return manaBlock(w, d, pending) || targetBlock(w, d);
+  }
+  function ownsAggro(w, d) {
+    return !["absorb", "taunt", "agitate"].includes(d.skill) || w.context.leader === w.actor.name;
+  }
+  function manaBlock(w, d, pending) {
+    const remaining = w.actor.mp - pending - cost(w, d.skill);
+    if (remaining < 0) return "insufficient MP";
+    if (d.category !== "survival" && remaining < reserve(w)) return "survival MP reserved";
+    return null;
+  }
+
+  // runtime/characters/skills/offense.ts
+  function attackChoices(w, primary) {
+    const ids = w.actor.ctype === "ranger" ? ["piercingshot", "3shot", "5shot"] : w.actor.ctype === "rogue" ? ["fanofknives"] : [];
+    return ids.map((id) => {
+      const cap = w.skills[id]?.max_targets || (id === "5shot" || id === "fanofknives" ? 5 : id === "3shot" ? 3 : 1);
+      const targets = [primary, ...w.context.monsters.filter((t) => t.id !== primary.id)].filter((t) => !blocked(w, decision(id, [t]))).sort((a, b) => Number(b.id === primary.id) - Number(a.id === primary.id) || usefulDamage(w, id, b) - usefulDamage(w, id, a) || a.id.localeCompare(b.id)).slice(0, cap);
+      return decision(id, targets);
+    }).filter((d) => d.targets.some((t) => t.id === primary.id));
+  }
+  function bestAttack(w, primary, affordable) {
+    const baseline = usefulDamage(w, "attack", primary);
+    const options = attackChoices(w, primary).filter(affordable).map((d) => ({
+      d,
+      score: d.targets.reduce((sum, t) => sum + usefulDamage(w, d.skill, t), 0)
+    }));
+    options.sort((a, b) => b.score - a.score || cost(w, a.d.skill) - cost(w, b.d.skill));
+    return options[0]?.score > baseline ? options[0].d : null;
+  }
+  function purifyUseful(w, target) {
+    if (damage(w, "purify", target, true) >= target.hp) return true;
+    return !purifiable(w, target).some((id) => w.condition(id)?.debuff || w.condition(id)?.bad);
+  }
+  function independentUseful(w, id, target) {
+    const remaining = target.hp - w.incoming(target);
+    if (remaining <= 0) return false;
+    if (id === "purify") return purifyUseful(w, target);
+    if (id === "huntersmark") return markUseful(w, target, remaining);
+    if (id === "supershot") return remaining >= damage(w, id, target) * 0.5;
+    return true;
+  }
+  function markUseful(w, target, remaining) {
+    const owner = w.context.allies.filter((a) => a.ctype === "ranger" && a.mp >= cost(w, "huntersmark") && w.range(a, "huntersmark")).sort((a, b) => a.name.localeCompare(b.name))[0];
+    return owner?.name === w.actor.name && !target.s?.marked && remaining >= damage(w, "attack", target) * Math.max(1, w.actor.frequency) * 3;
+  }
+  function damageChoices(w, target) {
+    const classes = {
+      ranger: ["huntersmark", "supershot"],
+      rogue: ["mentalburst", "quickstab", "quickpunch"],
+      paladin: ["purify", "shield_slam", "smash"]
+    };
+    const choices = (classes[w.actor.ctype] || []).filter((id) => independentUseful(w, id, target)).map((id) => decision(id, [target])).filter((d) => !blocked(w, d));
+    const score = (d) => {
+      if (d.skill === "mentalburst" && damage(w, d.skill, target, true) >= target.hp) return Infinity;
+      if (d.skill === "huntersmark") return Number.MAX_SAFE_INTEGER;
+      const divisor = w.context.mode === "event" ? (w.skills[d.skill]?.cooldown || 1e3) / 1e3 : Math.max(1, cost(w, d.skill));
+      return usefulDamage(w, d.skill, target) / divisor;
+    };
+    return choices.sort((a, b) => score(b) - score(a));
+  }
+
+  // runtime/characters/farming/rogue-knives.ts
+  function focused(w, t) {
+    return w.context.farmingScript === "lone-crab" ? t.mtype === "crab" : !!w.context.farmingFocus?.includes(t.mtype);
+  }
+  function eligibleTargets(w) {
+    return w.context.monsters.filter((t) => focused(w, t) && t.visible !== false && !t.dead && !t.rip && t.hp > w.incoming(t) && w.allowed(t, "fanofknives") && (!t.immune || w.skills.fanofknives?.pierces_immunity));
+  }
+  function createRogueKnifePositioner(ports) {
+    let region = "", centered = false, planAt = 0;
+    let moving = null;
+    const length = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+    function reset() {
+      region = "";
+      centered = false;
+      planAt = 0;
+      moving = null;
+      ports.report(null);
+    }
+    function sample(w, center) {
+      const visible = w.context.monsters.filter((t) => focused(w, t) && t.visible !== false && !t.dead && t.hp > 0 && w.allowed(t, "fanofknives"));
+      const eligible = eligibleTargets(w), cap = w.skills.fanofknives?.max_targets || 5;
+      const range = w.skills.fanofknives?.range || 160;
+      const count = (point) => {
+        const actor = { ...w.actor, x: point.x, y: point.y, real_x: point.x, real_y: point.y };
+        return Math.min(cap, eligible.filter((t) => distance(actor, t) <= range).length);
+      };
+      const here = { map: w.actor.map, x: w.actor.x, y: w.actor.y }, current = count(here);
+      function report(point, reason) {
+        ports.report({
+          at: w.now,
+          visible: visible.length,
+          inRegion: visible.filter((t) => ports.contains({ map: w.actor.map, x: t.x, y: t.y })).length,
+          inRange: eligible.filter((t) => w.range(t, "fanofknives")).length,
+          maxTargets: cap,
+          expectedTargets: count(point),
+          destination: point,
+          holdUntil: moving?.holdUntil || 0,
+          reason
+        });
+      }
+      return { center, eligible, cap, count, here, current, report };
+    }
+    return {
+      reset,
+      held() {
+        if (!moving || Date.now() >= moving.holdUntil || !ports.center()) return false;
+        const w = ports.world();
+        if (w.context.farmingScript === "lone-crab" && (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0)) return false;
+        return !!w.context.farmingScript && eligibleTargets(w).filter((t) => w.range(t, "fanofknives")).length <= 2;
+      },
+      tick() {
+        const center = ports.center(), w = ports.world();
+        if (!center || !w.context.farmingScript || w.context.mode === "blocked") {
+          reset();
+          return false;
+        }
+        const key = JSON.stringify([w.context.farmingScript, w.context.farmingFocus, center]);
+        if (key !== region) {
+          reset();
+          region = key;
+        }
+        const s = sample(w, center);
+        const refresh = ports.auraRecovery(w.actor);
+        if (refresh) {
+          moving = null;
+          planAt = 0;
+          s.report(refresh, "refreshing Kane aura");
+          return ports.move(refresh);
+        }
+        if (!centered) {
+          centered = length(s.here, center) <= 2;
+          s.report(center, "spawn center");
+          return ports.move(center);
+        }
+        if (s.current >= 3) {
+          moving = null;
+          s.report(s.here, "enough targets");
+          return ports.move(s.here);
+        }
+        if (moving) {
+          if (w.now < moving.deadline && length(s.here, moving.point) > 2 && s.count(moving.point) >= s.current + 2 && ports.contains(moving.point) && ports.canMove(moving.point)) {
+            s.report(moving.point, "better batch");
+            return ports.move(moving.point);
+          }
+          moving = null;
+        }
+        if (w.now < planAt || !unlocked(w, "fanofknives") || w.actor.mp < cost(w, "fanofknives")) {
+          s.report(s.here, "no worthwhile move");
+          return ports.move(s.here);
+        }
+        planAt = w.now + 500;
+        const seconds = Math.min(1, (ports.cooldownRemaining() + 250) / 1e3);
+        const radius = Math.max(0, w.actor.speed) * seconds;
+        let best = s.here;
+        let bestCount = s.current, bestDistance = 0;
+        const candidates = [];
+        for (const fraction of [1 / 3, 2 / 3, 1]) for (let angle = 0; angle < 16; angle++) {
+          const radians = angle * Math.PI / 8;
+          candidates.push({
+            map: center.map,
+            x: s.here.x + Math.cos(radians) * radius * fraction,
+            y: s.here.y + Math.sin(radians) * radius * fraction
+          });
+        }
+        for (const point of candidates) {
+          const travel = length(s.here, point);
+          if (travel < 2 || !ports.contains(point) || !ports.canMove(point)) continue;
+          const count = s.count(point);
+          if (count > bestCount || count === bestCount && travel < bestDistance) {
+            best = point;
+            bestCount = count;
+            bestDistance = travel;
+          }
+        }
+        if (bestCount >= s.current + 2) {
+          moving = { point: best, deadline: w.now + seconds * 1e3, holdUntil: w.now + Math.min(250, bestDistance / Math.max(1, w.actor.speed) * 1e3) };
+          s.report(best, "better batch");
+          return ports.move(best);
+        }
+        s.report(s.here, s.eligible.length ? "no worthwhile move" : "waiting for targets");
+        return ports.move(s.here);
+      }
+    };
+  }
+  function rogueKnifeAttack(w) {
+    const cap = w.skills.fanofknives?.max_targets || 5;
+    const targets = eligibleTargets(w).filter((t) => !blocked(w, decision("fanofknives", [t]))).sort((a, b) => Math.hypot(a.x - w.actor.x, a.y - w.actor.y) - Math.hypot(b.x - w.actor.x, b.y - w.actor.y) || a.id.localeCompare(b.id)).slice(0, cap);
+    return targets.length ? decision("fanofknives", targets, "damage", "rogue knife farm") : null;
+  }
+
+  // runtime/characters/skills/halloween-knives.ts
+  function halloweenKnifeWindow(w) {
+    if (w.actor.ctype !== "rogue" || w.context.mode !== "event" || w.context.event !== "halloween") return false;
+    if (w.context.monsters.some((t) => t.mtype === "jr" && !t.dead && t.hp > 0 && w.range(t, "fanofknives") && w.allowed(t, "fanofknives"))) return true;
+    const pumpkin = w.context.monsters.find((t) => t.mtype === "mrpumpkin" && !t.dead && t.hp > 0);
+    if (!pumpkin) return false;
+    const hp = pumpkin.hp / pumpkin.max_hp;
+    return [0.75, 0.5, 0.25].some((threshold) => hp <= threshold + 0.02 && hp >= threshold - 0.03);
+  }
+  function halloweenKnifeAttack(w) {
+    if (!halloweenKnifeWindow(w)) return null;
+    const targets = w.context.monsters.filter((t) => t.mtype === "jr" || t.mtype === "mrpumpkin").filter((t) => !blocked(w, decision("fanofknives", [t]))).sort((a, b) => Number(b.mtype === "jr") - Number(a.mtype === "jr") || Math.hypot(a.x - w.actor.x, a.y - w.actor.y) - Math.hypot(b.x - w.actor.x, b.y - w.actor.y) || a.id.localeCompare(b.id)).slice(0, w.skills.fanofknives?.max_targets || 5);
+    return targets.length ? decision("fanofknives", targets, "damage", "Mr. Pumpkin add-wave knives") : null;
+  }
+  function halloweenKnifePriority(w) {
+    return halloweenKnifeWindow(w) && unlocked(w, "fanofknives") && w.actor.mp >= cost(w, "fanofknives") + reserve(w);
+  }
+
+  // runtime/characters/skills/protection.ts
+  function absorbDecision(w) {
+    if (w.actor.ctype !== "priest" || w.context.leader !== w.actor.name) return null;
+    if (w.actor.mp - cost(w, "absorb") < cost(w, "heal")) return null;
+    const ally = w.context.allies.filter((a) => a.name !== w.actor.name && w.context.monsters.some((m) => m.target === a.name) && safeTransfer(w, a)).sort((a, b) => health(a) - health(b) || a.name.localeCompare(b.name)).find((a) => w.range(a, "absorb"));
+    return ally ? decision("absorb", [ally], "survival", "leader aggro rescue") : null;
+  }
+  function selfHeal(w) {
+    const output = (w.skills.selfheal?.levels || [[0, w.skills.selfheal?.output || 400]]).filter(([level]) => level <= w.actor.level).at(-1)?.[1] || 400;
+    if (health(w.actor) < 0.7 || w.actor.max_hp - w.actor.hp >= output * 0.8)
+      return decision("selfheal", [], "survival", "self healing");
+    return null;
+  }
+  function cleanse(w) {
+    const candidates = w.context.allies.filter((a) => a.name !== w.actor.name && w.range(a, "cleansing_light")).filter((a) => Object.keys(a.s || {}).some((id) => w.condition(id)?.cleansable)).sort((a, b) => Number(endangered(w, b)) - Number(endangered(w, a)) || Number(b.name === w.context.leader) - Number(a.name === w.context.leader) || health(a) - health(b));
+    const ally = candidates[0];
+    if (!ally) return null;
+    const urgent = endangered(w, ally) || Object.keys(ally.s).some((id) => ["stunned", "frozen", "deepfreezed", "tangled", "poisoned", "burned"].includes(id));
+    return decision("cleansing_light", [ally], urgent ? "survival" : "maintenance", "cleanse harmful conditions");
+  }
+  function oath(w) {
+    const outgoing = w.context.allies.some((a) => {
+      const s = a.s?.guardians_oath;
+      return s?.f === w.actor.name || s?.from === w.actor.name;
+    });
+    if (outgoing) return null;
+    const ally = w.context.allies.filter((a) => a.name !== w.actor.name && !a.s?.guardians_oath).filter((a) => w.range(a, "guardians_oath") && endangered(w, a) && safeTransfer(w, a, 0.35)).sort((a, b) => health(a) - health(b) || Number(b.name === w.context.leader) - Number(a.name === w.context.leader))[0];
+    return ally ? decision("guardians_oath", [ally], "survival", "protect endangered ally") : null;
+  }
+  function beacon(w) {
+    const nearby = w.context.allies.filter((a) => w.range(a, "beacon_of_resolve"));
+    if (nearby.some((a) => a.s?.beacon_of_resolve)) return null;
+    const leader = nearby.find((a) => a.name === w.context.leader);
+    const urgent = !!leader && leader.hp - incomingDps(w, leader) * 2 < leader.max_hp * 0.3;
+    if (!urgent && nearby.filter((a) => incomingDps(w, a) > 0).length < 2) return null;
+    return decision("beacon_of_resolve", [], urgent ? "survival" : "maintenance", "party defensive burst");
+  }
+  function shield(w) {
+    const mana = !!w.actor.s?.mshield;
+    const incoming = incomingDps(w, w.actor);
+    if (mana && (health(w.actor) > 0.65 || w.actor.mp <= reserve(w)))
+      return decision("mshield", [], "survival", "release mana shield");
+    if (!mana && health(w.actor) < 0.4 && incoming > 0 && w.actor.mp > reserve(w))
+      return decision("mshield", [], "survival", "emergency mana shield");
+    return aetherShield(w, incoming);
+  }
+  function aetherShield(w, incoming) {
+    const magic = w.context.monsters.some((m) => m.target === w.actor.name && m.damage_type === "magical");
+    if (!w.actor.s.mshield && !w.actor.s.aether_shield && magic && w.actor.hp - incoming * 2 > w.actor.max_hp * 0.3 && w.actor.mp < w.actor.max_mp)
+      return decision("aether_shield", [], "maintenance", "recover mana from magical wounds");
+    return null;
+  }
+  function desiredAuras(w) {
+    const threatening = w.context.monsters.filter((m) => w.context.allies.some((a) => a.name === m.target));
+    const conditionPressure = w.context.allies.some((a) => Object.keys(a.s || {}).some((id) => w.condition(id)?.cleansable));
+    if (conditionPressure) return ["warding", "bulwark", "sanctuary", "zeal"];
+    const magical = threatening.filter((m) => m.damage_type === "magical").length > threatening.length / 2;
+    return magical ? ["sanctuary", "zeal", "bulwark", "warding"] : ["bulwark", "zeal", "sanctuary", "warding"];
+  }
+  function aura(w) {
+    if (!unlocked(w, "paladin_aura")) return null;
+    const paladins = w.context.allies.filter((a) => a.ctype === "paladin" && a.level >= (w.skills.paladin_aura?.level || 60) && w.range(a, "paladin_aura")).sort((a, b) => Number(b.name === w.context.leader) - Number(a.name === w.context.leader) || b.level - a.level || a.name.localeCompare(b.name));
+    const choices = desiredAuras(w);
+    if (!paladins.some((a) => a.name === w.context.leader)) choices.unshift(...choices.splice(choices.indexOf("zeal"), 1));
+    const state = choices[Math.max(0, paladins.findIndex((a) => a.name === w.actor.name)) % choices.length];
+    const own = w.actor.s?.["paladin_aura_" + state];
+    if (own && (own.f === w.actor.name || own.from === w.actor.name)) return null;
+    return { ...decision("paladin_aura", [], "maintenance", "party aura coverage"), argument: state };
+  }
+  function paladinSupport(w) {
+    return [selfHeal(w), shield(w), cleanse(w), oath(w), beacon(w), aura(w)].filter((d) => !!d);
+  }
+  function rogueSupport(w) {
+    const rogues = w.context.allies.filter((a) => a.ctype === "rogue" && a.level >= 40).sort((a, b) => a.name.localeCompare(b.name));
+    if (rogues[0]?.name !== w.actor.name) return [];
+    const target = w.context.allies.find((a) => (!a.s?.rspeed || (a.s.rspeed.ms || 0) < 6e4) && w.range(a, "rspeed"));
+    return target ? [decision("rspeed", [target], "maintenance", "maintain party swiftness")] : [];
+  }
+  function combatBuffSupport(w) {
+    const skill = w.actor.ctype === "warrior" ? "warcry" : w.actor.ctype === "priest" ? "darkblessing" : null;
+    if (!skill || w.actor.s?.[skill]) return [];
+    return [decision(skill, [], "maintenance", "maintain combat buff")];
+  }
+  function opener(w, target) {
+    if (w.actor.ctype !== "rogue" || w.actor.s?.invis || w.actor.s?.marked) return null;
+    if (target.target || w.context.monsters.some((m) => m.target === w.actor.name)) return null;
+    return decision("invis", [], "maintenance", "unengaged opener");
+  }
+
+  // runtime/characters/skills/engine.ts
+  function createSkillEngine(ports) {
+    const budget = createManaBudget(), pending = /* @__PURE__ */ new Map();
+    let epoch = 0, stopped = false, auraAt = -Infinity, auraState = "", openerPending = false;
+    const failures = /* @__PURE__ */ new Map();
+    function world() {
+      const w = ports.world();
+      for (const [id, p] of pending) if (p.until <= w.now && !w.cooldown(id)) pending.delete(id);
+      return w;
+    }
+    const family = (w, id) => w.skills[id]?.share || id;
+    function report(w, d, status, reason = d.reason) {
+      ports.diagnostic({
+        at: w.now,
+        skill: d.skill,
+        targets: d.targets.map((t) => t.id || t.name),
+        category: d.category,
+        reserve: reserve(w),
+        reason,
+        status
+      });
+    }
+    function affordable(w, d) {
+      const inFlight = [...pending.values()].reduce((n, p) => n + p.cost, 0);
+      const reason = blocked(w, d, inFlight);
+      if (reason) {
+        report(w, d, "skipped", reason);
+        return false;
+      }
+      if (pending.has(family(w, d.skill)) || (failures.get(d.skill) || 0) > w.now) return false;
+      const cap = Math.max(0, ...Object.keys(w.skills).map((id) => id).filter((id) => unlocked(w, id) && cost(w, id) <= w.actor.mp - reserve(w)).map((id) => cost(w, id)));
+      const credit = budget.observe(w.now, w.actor.mp, w.actor.mp - reserve(w), cap);
+      if (d.category === "damage" && w.context.mode !== "event" && !(!!w.context.farmingScript && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
+        report(w, d, "skipped", "sustained farming MP budget");
+        return false;
+      }
+      return true;
+    }
+    function settle(d, actions, result) {
+      const response = result;
+      const accepted = new Set(response?.targets || (response?.target ? [response.target] : []));
+      d.targets.forEach((t, i) => {
+        if (!actions[i]) return;
+        const success = accepted.has(t.id) || !response?.targets && d.targets.length === 1;
+        ports.evidence(t, success ? "engaged" : "rejected", actions[i]);
+      });
+    }
+    function rejectActions(d, actions) {
+      actions.forEach((a, i) => {
+        if (a) ports.evidence(d.targets[i], "rejected", a);
+      });
+    }
+    function recordAura(w, d) {
+      if (d.skill === "paladin_aura") {
+        auraAt = w.now;
+        auraState = d.argument || "";
+      }
+    }
+    async function execute(d) {
+      const w = world();
+      if (stopped || !affordable(w, d)) return false;
+      const id = family(w, d.skill), amount = cost(w, d.skill);
+      const token = { epoch, cost: amount, until: w.now + 2500 };
+      pending.set(id, token);
+      if (d.category === "damage") budget.debit(amount);
+      const actions = d.targets.map((t) => w.skills[d.skill]?.hostile ? ports.evidence(t, "pending") : null);
+      report(w, d, "selected");
+      let timeout;
+      try {
+        const result = await Promise.race([ports.cast(d), new Promise((_, reject) => {
+          timeout = setTimeout(() => reject(new Error("skill acknowledgement timeout")), 2500);
+        })]);
+        if (epoch !== token.epoch || stopped) return false;
+        settle(d, actions, result);
+        recordAura(w, d);
+        report(w, d, "accepted");
+        return true;
+      } catch (error) {
+        rejectActions(d, actions);
+        if (epoch !== token.epoch || stopped) return false;
+        failures.set(d.skill, ports.world().now + 1e3);
+        report(w, d, "rejected", errorReason(error));
+        return false;
+      } finally {
+        clearTimeout(timeout);
+        if (pending.get(id) === token) pending.delete(id);
+      }
+    }
+    async function first(choices) {
+      const w = world();
+      const d = choices.find((d2) => affordable(w, d2));
+      return d ? execute(d) : false;
+    }
+    return {
+      ready(d) {
+        return affordable(world(), d);
+      },
+      cast: execute,
+      async absorb() {
+        const d = absorbDecision(world());
+        return d ? execute(d) : false;
+      },
+      support() {
+        const w = world();
+        if (!!w.context.farmingScript) return Promise.resolve(false);
+        const choices = w.actor.ctype === "paladin" ? paladinSupport(w) : w.actor.ctype === "rogue" ? rogueSupport(w) : combatBuffSupport(w);
+        return first(choices.filter((d) => d.skill !== "paladin_aura" || w.now - auraAt >= 1e4 && d.argument !== auraState));
+      },
+      offense(target) {
+        const w = world();
+        if (halloweenKnifePriority(w)) return Promise.resolve(false);
+        if (!!w.context.farmingScript) return Promise.resolve(false);
+        return first(damageChoices(w, target));
+      },
+      attack(target) {
+        const w = world();
+        if (w.context.mode === "blocked" || !["ranger", "rogue"].includes(w.actor.ctype)) return null;
+        if (!!w.context.farmingScript) {
+          if (ports.rogueKnifeAttackHeld?.()) return Promise.resolve(false);
+          const d2 = rogueKnifeAttack(w);
+          return d2 ? execute(d2) : Promise.resolve(false);
+        }
+        if (halloweenKnifePriority(w)) {
+          const knives = halloweenKnifeAttack(w);
+          return knives && affordable(w, knives) ? execute(knives) : Promise.resolve(false);
+        }
+        const opening = opener(w, target);
+        if (opening && affordable(w, opening)) {
+          openerPending = true;
+          return execute(opening).finally(() => {
+            openerPending = false;
+          });
+        }
+        const d = bestAttack(w, target, (d2) => affordable(w, d2));
+        return d ? execute(d) : null;
+      },
+      busy() {
+        world();
+        return openerPending || pending.has("attack");
+      },
+      reset() {
+        epoch++;
+        budget.reset();
+        auraAt = -Infinity;
+        auraState = "";
+      },
+      stop() {
+        stopped = true;
+        epoch++;
+      }
+    };
+  }
+
+  // runtime/characters/skills/projectiles.ts
+  function usable(data) {
+    return !!data.pid && !!data.target && Number(data.damage) > 0 && Number(data.eta) > 0;
+  }
+  function createProjectileTracker(world) {
+    const flights = /* @__PURE__ */ new Map();
+    function prune(now) {
+      for (const [id, p] of flights) if (p.until <= now) flights.delete(id);
+    }
+    return {
+      action(data) {
+        const w = world();
+        prune(w.now);
+        if (!usable(data)) return;
+        if (!w.context.allies.some((a) => a.name === data.attacker || a.id === data.attacker)) return;
+        const target = w.context.monsters.find((t) => t.id === data.target);
+        if (!target) return;
+        const definition = Object.entries(w.skills).find(([id]) => id === data.type)?.[1];
+        const defense = definition?.damage_type === "magical" ? target.resistance : target.armor;
+        const factor = definition?.damage_type === "pure" ? 1 : w.damageMultiplier(Number(defense) || 0);
+        flights.set(data.pid, { target: data.target, amount: Number(data.damage) * factor * 0.9, until: w.now + Number(data.eta) });
+      },
+      hit(data) {
+        if (data.pid) flights.delete(data.pid);
+      },
+      incoming(target, now) {
+        prune(now);
+        return [...flights.values()].filter((p) => p.target === target).reduce((n, p) => n + p.amount, 0);
+      },
+      clear() {
+        flights.clear();
+      }
+    };
+  }
+
+  // runtime/characters/farming/kane-aura.ts
+  var AURA_RANGE = 320;
+  function createKaneAuraRecovery(ports) {
+    let lastSeen = null;
+    return {
+      destination(actor) {
+        if (lastSeen && (lastSeen.map !== actor.map || lastSeen.in !== actor.in)) lastSeen = null;
+        const kane = Object.values(ports.entities()).find((e) => "npc" in e && e.npc === "citizen0" && e.visible !== false && !e.dead && !e.rip && (!e.map || e.map === actor.map) && (e.in == null || e.in === actor.in));
+        if (kane) lastSeen = {
+          ...kane,
+          map: actor.map,
+          in: actor.in,
+          x: kane.real_x ?? kane.x,
+          y: kane.real_y ?? kane.y
+        };
+        const npc = kane || lastSeen;
+        const buff = actor.s.citizen0aura;
+        if (buff && (buff.ms == null || buff.ms > 0) || !npc) return null;
+        const here = { map: actor.map, x: actor.real_x ?? actor.x, y: actor.real_y ?? actor.y };
+        if (distance(actor, npc) < AURA_RANGE) return here;
+        const x = npc.real_x ?? npc.x, y = npc.real_y ?? npc.y;
+        const halfWidth = (ports.width(actor) + ports.width(npc)) / 2;
+        const nearest = {
+          x: Math.max(x - halfWidth, Math.min(x + halfWidth, here.x)),
+          y: Math.max(y - ports.height(npc), Math.min(y + ports.height(actor), here.y))
+        };
+        const dx = here.x - nearest.x, dy = here.y - nearest.y, gap = Math.hypot(dx, dy);
+        const ratio = Math.min(1, (AURA_RANGE - 1) / Math.max(1, gap));
+        const projected = { map: actor.map, x: nearest.x + dx * ratio, y: nearest.y + dy * ratio };
+        const reachable = (point) => ports.canMove(point) && distance({ ...actor, x: point.x, y: point.y, real_x: point.x, real_y: point.y }, npc) < AURA_RANGE;
+        if (reachable(projected)) return projected;
+        const candidates = [{ map: actor.map, x, y }];
+        for (const radius of [319, 239, 159, 79]) for (let i = 0; i < 64; i++) {
+          const angle = i * Math.PI / 32;
+          candidates.push({ map: actor.map, x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius });
+        }
+        return candidates.filter(reachable).sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y))[0] || here;
+      }
+    };
+  }
+
+  // runtime/characters/skills/runtime.ts
+  function mitigation2(defense) {
+    const rates = [1e-3, 1e-3, 95e-5, 9e-4, 82e-5, 7e-4, 6e-4, 5e-4];
+    const reduction = rates.reduce((sum, rate, i) => sum + Math.max(0, Math.min(100, defense - i * 100)) * rate, 0) + Math.max(0, defense - 800) * 4e-4;
+    const piercing = [1e-3, 75e-5, 5e-4].reduce((sum, rate, i) => sum + Math.max(0, Math.min(50, -defense - i * 50)) * rate, 0) + Math.max(0, -defense - 150) * 25e-5;
+    return Math.min(1.32, Math.max(0.05, 1 - reduction + piercing));
+  }
+  function installSkillRuntime(root) {
+    const host = parent;
+    const shared = root.sharedRoutine;
+    const projectiles = createProjectileTracker(world);
+    function world() {
+      const actor = character;
+      const context = shared.combatContext?.() || {
+        leader: "",
+        allies: [],
+        monsters: [],
+        mode: "blocked",
+        event: null,
+        observedAt: 0
+      };
+      if (host.is_disabled?.(actor)) context.mode = "blocked";
+      const skills = G.skills;
+      const result = {
+        actor,
+        context,
+        skills,
+        now: Date.now(),
+        item: (name) => G.items[name],
+        condition: (name) => G.conditions[name],
+        cooldown: (id) => id === "invis" && !!shared.merchantVisibilityActive?.() || Number(host.next_skill?.[id]) > Date.now(),
+        damageMultiplier: host.damage_multiplier || mitigation2,
+        incoming: (t) => projectiles.incoming(t.id, Date.now()),
+        range: (t, id) => skillRange(actor, t, skills[id]),
+        allowed: (t, id) => authorized(result, t, id)
+      };
+      return result;
+    }
+    function authorized(w, t, id) {
+      if (returnTargetBlocked(t, id) || frankySkillBlocked(id, [t])) return false;
+      const type = w.skills[id]?.damage_type || "physical";
+      if (id !== "taunt" && monsterAttackBlock(t.mtype, type, w.actor.range)) return false;
+      if (!targetAuthorized(t, id)) return false;
+      if (t.target || w.context.mode !== "scatter") return true;
+      const added = { ...w.context, monsters: w.context.monsters.map((m) => m.id === t.id ? { ...m, target: w.actor.name } : m) };
+      return w.actor.hp - 2 * incomingDps({ ...w, context: added }, w.actor) > w.actor.max_hp * 0.3;
+    }
+    function targetAuthorized(t, id) {
+      return !!shared.skillTargetAllowed?.(t) && shared.rareAttackAllowed?.(t, id) !== false;
+    }
+    const returnExcluded = /* @__PURE__ */ new Set(["taunt", "agitate", "charge", "dash", "blink", "scare", "stomp", "cleave", "fanofknives"]);
+    function returnTargetBlocked(t, id) {
+      return !!shared.returnCombatActive?.() && (returnExcluded.has(id) || !shared.returnAttacker?.(t));
+    }
+    function returnCastBlocked(d) {
+      if (!shared.returnCombatActive?.()) return false;
+      if (returnExcluded.has(d.skill)) return true;
+      return !!world().skills[d.skill]?.hostile && d.targets.some((t) => !shared.returnAttacker?.(t));
+    }
+    const frankyExcluded = /* @__PURE__ */ new Set(["agitate", "charge", "dash", "blink", "scare", "stomp", "cleave", "fanofknives"]);
+    function frankySkillBlocked(id, targets) {
+      if (!shared.frankyCombatActive?.()) return false;
+      return frankyExcluded.has(id) || !!world().skills[id]?.hostile && targets.some((t) => t.type !== "monster" || t.mtype !== "franky" || !shared.skillTargetAllowed?.(t));
+    }
+    function castSkill(d) {
+      if (frankySkillBlocked(d.skill, d.targets)) return Promise.reject(new Error("Skill conflicts with Franky-only combat"));
+      if (returnCastBlocked(d)) return Promise.reject(new Error("Skill conflicts with return movement or attacker-only policy"));
+      const argument = d.argument ?? (d.targets.length > 1 || world().skills[d.skill]?.multi ? d.targets.map((t) => t.id) : d.targets[0]?.id || d.targets[0]?.name);
+      return host.use_skill(d.skill, argument);
+    }
+    const kaneAura = createKaneAuraRecovery({
+      entities: () => host.entities,
+      width: (entity) => host.get_width(entity),
+      height: (entity) => host.get_height(entity),
+      canMove: (point) => can_move_to(point.x, point.y)
+    });
+    const knifePositioner = createRogueKnifePositioner({
+      world,
+      center: () => shared.rogueKnifeFarm?.() || null,
+      auraRecovery: (actor) => world().context.farmingScript === "lone-crab" ? kaneAura.destination(actor) : null,
+      contains: (point) => shared.rogueKnifeFarmContains?.(point) ?? false,
+      canMove: (point) => can_move_to(point.x, point.y),
+      move: (point) => shared.rogueKnifeFarmMove?.(point) ?? false,
+      cooldownRemaining: () => Math.max(0, Number(host.next_skill?.attack) - Date.now()) || 0,
+      report: (diagnostic) => {
+        if (root.partyCombatState) root.partyCombatState.crabFarm = diagnostic;
+      }
+    });
+    const engine = createSkillEngine({
+      rogueKnifeAttackHeld: () => knifePositioner.held(),
+      world,
+      cast: castSkill,
+      evidence: (t, state, action2) => shared.queueEvidence?.(t, state, action2) || null,
+      diagnostic: (d) => {
+        if (root.partyCombatState) root.partyCombatState.skill = d;
+      }
+    });
+    shared.skillSupport = () => engine.support();
+    shared.skillOffense = (t) => engine.offense(t);
+    shared.absorbLeaderAggro = () => engine.absorb();
+    if (shared.combatContext) {
+      shared.combatSkillReady = (id, target, category) => engine.ready(decision(id, [target], category));
+      shared.castCombatSkill = (id, target, category) => engine.cast(decision(id, [target], category));
+    }
+    const action = (data) => projectiles.action(data);
+    const hit = (data) => projectiles.hit(data);
+    host.socket?.on?.("action", action);
+    host.socket?.on?.("hit", hit);
+    return {
+      ...engine,
+      farmMovement: () => knifePositioner.tick(),
+      reset() {
+        engine.reset();
+        projectiles.clear();
+        knifePositioner.reset();
+      },
+      stop() {
+        engine.stop();
+        projectiles.clear();
+        knifePositioner.reset();
+        host.socket?.off?.("action", action);
+        host.socket?.off?.("hit", hit);
+      }
+    };
+  }
+  function skillRange(actor, target, s) {
+    if (!s) return false;
+    const base = s.use_range ? actor.range : s.range || actor.range;
+    const range = base * (s.range_multiplier || 1) + (s.range_bonus || 0);
+    const distanceTo = typeof distance === "function" ? distance(actor, target) : Math.hypot(actor.x - target.x, actor.y - target.y);
+    return distanceTo <= range;
+  }
+
+  // runtime/characters/roles/item-swaps-runtime.ts
+  function partyCycleDamage(target, host) {
+    const party = host.party_list || Object.keys(get_party() || {});
+    const names = [.../* @__PURE__ */ new Set([...party, character.name])];
+    const multiply = host.damage_multiplier || mitigation2;
+    return names.reduce((total, name) => {
+      const actor = name === character.name ? character : get_player(name);
+      if (!actor || actor.rip || actor.map && actor.map !== character.map || actor.in != null && actor.in !== character.in || distance(actor, target) > actor.range || monsterAttackBlock(target.mtype, actor.damage_type || G.classes[actor.ctype]?.damage_type, actor.range)) return total;
+      const type = actor.damage_type || G.classes[actor.ctype]?.damage_type;
+      const defense = type === "magical" ? (target.resistance || 0) - (actor.rpiercing || 0) : target.armor - (actor.apiercing || 0);
+      const crit = 1 + Math.min(1, (actor.crit || 0) / 100) * (1 + (actor.critdamage || 0) / 100);
+      const output = (actor.output ?? G.classes[actor.ctype]?.output ?? 100) / 100;
+      return total + actor.attack * output * crit * (type === "pure" ? 1 : multiply(defense)) * multiply((target.for || 0) * 5) * (1 + (target.incdmgamp || 0) / 100);
+    }, 0);
+  }
+  function installItemSwaps(root) {
+    const host = parent;
+    const memory = host.__partyInventorySwaps ??= {};
+    const key = "party-inventory-swap:" + character.name;
+    const storage = globalThis.localStorage;
+    if (!memory.loaded) {
+      memory.loaded = true;
+      try {
+        const saved = JSON.parse(storage.getItem(key) || "null");
+        if (!memory.session && validSwapSession(saved)) {
+          memory.session = saved;
+          saved.phase = "restoring";
+        }
+      } catch {
+      }
+    }
+    const item = (slot) => character.slots[slot] || null;
+    const definitions = G.items;
+    const controller = createItemSwapController({
+      now: Date.now,
+      equipped: item,
+      inventory: () => character.items,
+      batch: (entries) => equip_batch(entries),
+      unequip: (slot) => Promise.resolve(unequip(slot)),
+      save: (session) => session ? storage.setItem(key, JSON.stringify(session)) : storage.removeItem(key),
+      report: (value) => {
+        root.partyCombatState.itemSwap = {
+          ...value,
+          reserved: memory.session?.slots.flatMap((entry) => [entry.original, entry.desired].filter((item2) => !!item2)) || []
+        };
+      },
+      prepare(swap, trigger2) {
+        const slots = swap.items.map((selection) => {
+          const definition2 = definitions[selection.item.name];
+          const choices = itemSwapSlots(definition2?.type);
+          const cls = G.classes[character.ctype];
+          const weapon2 = definition2 && "wtype" in definition2 ? definition2.wtype : void 0;
+          const handCompatible = weapon2 && (selection.slot === "mainhand" ? !!cls.mainhand[weapon2] || !!cls.doublehand[weapon2] : weapon2 in cls.offhand);
+          const offhandCompatible = weapon2 ? handCompatible : definition2 && definition2.type in cls.offhand;
+          if (!definition2 || !choices.includes(selection.slot) || definition2.class && !definition2.class.includes(character.ctype) || selection.slot === "mainhand" && !handCompatible || selection.slot === "offhand" && !offhandCompatible)
+            throw Error("Cannot equip " + selection.item.name + " in " + selection.slot);
+          return {
+            slot: selection.slot,
+            original: item(selection.slot) && swapIdentity(item(selection.slot)),
+            desired: swapIdentity(selection.item),
+            inventorySlot: selection.inventorySlot
+          };
+        });
+        const mainhand = slots.find((entry) => entry.slot === "mainhand")?.desired || item("mainhand");
+        const definition = mainhand && definitions[mainhand.name];
+        const weapon = definition && "wtype" in definition ? definition.wtype : void 0;
+        if (weapon && G.classes[character.ctype].doublehand?.[weapon]) {
+          if (slots.some((entry) => entry.slot === "offhand")) throw Error("Two-handed weapon conflicts with offhand selection");
+          if (slots.some((entry) => entry.slot === "mainhand") && item("offhand"))
+            slots.push({ slot: "offhand", original: swapIdentity(item("offhand")), desired: null, inventorySlot: -1 });
+          else if (swap.items.some((entry) => entry.slot === "offhand")) throw Error("Current weapon requires both hands");
+        }
+        slots.sort((a, b) => Number(b.slot === "mainhand") - Number(a.slot === "mainhand"));
+        return {
+          strategy: swap.strategy,
+          configuration: JSON.stringify(swap),
+          target: trigger2.target,
+          threshold: trigger2.threshold,
+          phase: "equipping",
+          slots
+        };
+      }
+    }, memory);
+    function trigger(swap) {
+      switch (swap.strategy) {
+        case "luck-before-kill": {
+          const monsters = Object.values(host.entities).filter((target) => target.type === "monster" && !target.dead && target.hp > 0 && target.target === character.name && !root.partyRoleRunner?.isKnownDead(target.id));
+          monsters.sort((a, b) => Number(b.id === memory.session?.target) - Number(a.id === memory.session?.target) || a.hp - b.hp);
+          for (const target of monsters) {
+            const coop = target.cooperative || target.mtype && G.monsters[target.mtype]?.cooperative;
+            const threshold = coop ? target.max_hp * 0.05 : memory.session?.target === target.id ? memory.session.threshold : partyCycleDamage(target, host) * 2;
+            if (target.hp <= threshold) return { target: target.id, threshold };
+          }
+          return null;
+        }
+      }
+    }
+    return root.partyItemSwaps = {
+      ...controller,
+      tick(allowed) {
+        if (character.rip || root.sharedRoutine.itemSwapMutationBlocked?.()) return;
+        if (root.partyPorcupineEquipment?.busy()) return;
+        const swaps = root.sharedRoutine.itemSwapSettings?.() || [];
+        const handConflict = root.partyPorcupineEquipment?.ownsHands() && swaps.some((swap) => swap.enabled && swap.items.some((selection) => selection.slot === "mainhand" || selection.slot === "offhand"));
+        controller.tick(swaps, trigger, allowed && !handConflict);
+      }
+    };
+  }
+
+  // runtime/consumables.ts
+  function isRenewableConsumable(definition) {
+    return !!definition && typeof definition === "object" && "type" in definition && definition.type === "elixir" && "duration" in definition && typeof definition.duration === "number" && Number.isFinite(definition.duration) && definition.duration > 0;
+  }
+
+  // runtime/characters/roles/auto-consumable.ts
+  function installAutoConsumable(root) {
+    let active = true, busy2 = false, retryAt = 0;
+    function ready() {
+      return active && !busy2 && Date.now() >= retryAt;
+    }
+    function blocked2() {
+      return character.rip || root.sharedRoutine.itemSwapMutationBlocked?.() || root.partyItemSwaps?.busy() || root.partyItemSwaps?.ownsEquipment();
+    }
+    function elixirActive() {
+      const elixir = character.slots.elixir;
+      return !!elixir && (!elixir.expires || !(Date.parse(elixir.expires) <= Date.now()));
+    }
+    async function tick() {
+      const name = root.sharedRoutine.autoConsumable?.();
+      if (!name || !ready() || blocked2() || elixirActive()) return;
+      const slot = character.items.findIndex((item2) => item2?.name === name);
+      const item = character.items[slot];
+      if (!item) return;
+      if (!isRenewableConsumable(G.items[item.name])) return;
+      busy2 = true;
+      retryAt = Date.now() + 5e3;
+      try {
+        await Promise.resolve(consume(slot));
+      } catch (error) {
+        retryAt = Date.now() + 3e4;
+        game_log("Automatic consumable failed: " + name + ": " + errorReason(error), "red");
+      } finally {
+        busy2 = false;
+      }
+    }
+    const timer = setInterval(() => {
+      void tick();
+    }, 500);
+    return { stop() {
+      active = false;
+      clearInterval(timer);
+    } };
   }
 
   // runtime/coordinator/merchant/anniversary-control.ts
@@ -430,15 +1591,6 @@
       retryAt,
       mode: state.mode || "idle"
     };
-  }
-
-  // runtime/characters/roles/types.ts
-  function errorReason(error) {
-    if (error && typeof error === "object") {
-      if ("reason" in error && typeof error.reason === "string") return error.reason;
-      if ("message" in error && typeof error.message === "string") return error.message;
-    }
-    return String(error);
   }
 
   // runtime/characters/roles/crab-range.ts
@@ -793,806 +1945,6 @@
       },
       tick
     };
-  }
-
-  // runtime/characters/skills/budget.ts
-  function createManaBudget() {
-    let last = null;
-    let credit = 0;
-    const recovery = [];
-    return {
-      observe(now, mp, surplus, cap) {
-        if (!last) credit = cap;
-        else {
-          const recovered = Math.max(0, mp - last.mp);
-          if (recovered) recovery.push({ at: now, amount: recovered });
-          while (recovery.length && recovery[0].at < now - 3e4) recovery.shift();
-          const rate = recovery.reduce((sum, r) => sum + r.amount, 0) / 30 + Math.max(0, surplus) / 30;
-          credit += Math.max(0, Math.min(30, (now - last.at) / 1e3)) * rate;
-        }
-        credit = Math.min(Math.max(0, cap), credit);
-        last = { at: now, mp };
-        return credit;
-      },
-      debit(amount) {
-        credit = Math.max(0, credit - amount);
-      },
-      reset() {
-        last = null;
-        credit = 0;
-        recovery.length = 0;
-      }
-    };
-  }
-
-  // runtime/characters/skills/types.ts
-  var health = (actor) => actor.hp / Math.max(1, actor.max_hp);
-  var decision = (skill, targets = [], category = "damage", reason = skill) => ({ skill, targets, category, reason });
-
-  // runtime/characters/skills/damage.ts
-  function rawDamage(w, id, target) {
-    const s = w.skills[id];
-    if (id === "shield_slam") return shieldDamage(w);
-    if (id === "purify") return (s?.damage || 2e3) + purifiable(w, target).length * 400;
-    return s?.damage ?? w.actor.attack * (s?.damage_multiplier ?? 1);
-  }
-  function purifiable(w, target) {
-    return Object.keys(target.s).filter((id) => {
-      const c = w.condition(id);
-      return target.s[id]?.citizens || (c?.buff || c?.debuff) && !c?.persistent;
-    });
-  }
-  function shieldDamage(w) {
-    const s = w.skills.shield_slam;
-    return w.actor.attack * (s?.damage_multiplier || 3) + Math.min(Math.max(0, w.actor.armor), s?.armor_cap || 1e3) * (s?.armor_multiplier || 12);
-  }
-  function mitigation(w, id, target) {
-    const s = w.skills[id];
-    const type = id === "attack" ? w.actor.damage_type : s?.damage_type;
-    if (type === "pure") return 1;
-    const defense = type === "magical" ? Number(target.resistance) - Number(w.actor.rpiercing || 0) : Number(target.armor) - Number(w.actor.apiercing || 0) - Number(s?.apiercing || 0);
-    return w.damageMultiplier(Number.isFinite(defense) ? defense : 0);
-  }
-  function damage(w, id, target, minimum = false) {
-    const s = w.skills[id];
-    let result = rawDamage(w, id, target);
-    if (!minimum && (id === "attack" || s?.procs)) result *= criticalMultiplier(w);
-    result += stackDamage(w, target);
-    result *= mitigation(w, id, target) * targetMultiplier(w, target);
-    return minimum ? result * 0.9 : result;
-  }
-  function stackDamage(w, target) {
-    return w.actor.ctype === "rogue" ? Math.min(w.skills.stack?.max || 2e3, (target.s.stack?.s || 0) + 1) : 0;
-  }
-  function targetMultiplier(w, target) {
-    const fortitude = Number(Reflect.get(target, "for")) || 0;
-    const amp = Number(Reflect.get(target, "incdmgamp")) || 0;
-    return w.damageMultiplier(fortitude * 5) * (1 + amp / 100);
-  }
-  function criticalMultiplier(w) {
-    return 1 + Math.min(1, (w.actor.crit || 0) / 100) * ((w.actor.critdamage || 0) / 100 + 1);
-  }
-  var usefulDamage = (w, id, target) => Math.min(Math.max(0, target.hp - w.incoming(target)), damage(w, id, target));
-  function incomingDps(w, actor, extraTarget) {
-    return w.context.monsters.filter((m) => m.target === actor.name || !!extraTarget && m.target === extraTarget).reduce((sum, m) => {
-      if (!Number.isFinite(m.attack) || !Number.isFinite(m.frequency)) return Infinity;
-      const defense = m.damage_type === "magical" ? actor.resistance : actor.armor;
-      return sum + m.attack * Number(m.frequency) * w.damageMultiplier(Number(defense) || 0) * 1.1;
-    }, 0);
-  }
-  function safeTransfer(w, source, fraction = 1) {
-    if (w.now - w.context.observedAt > 1500) return false;
-    const current = incomingDps(w, w.actor);
-    const added = fraction === 1 ? incomingDps(w, w.actor, source.name) - current : incomingDps(w, source) * fraction;
-    return w.actor.hp - 2 * (current + added) > w.actor.max_hp * 0.3;
-  }
-  function endangered(w, ally) {
-    const dps = incomingDps(w, ally);
-    return dps > 0 && (health(ally) < 0.6 || ally.hp - 2 * dps < ally.max_hp * 0.3);
-  }
-
-  // runtime/characters/skills/eligibility.ts
-  function cost(w, id) {
-    const mp = id === "heal" ? w.actor.mp_cost : w.skills[id]?.mp;
-    return Math.ceil(Math.max(0, Number(mp) || 0) * (1 - Math.min(100, Math.max(0, w.actor.mp_reduction || 0)) / 100));
-  }
-  function equipment(w, s) {
-    const main = w.actor.slots.mainhand, off = w.actor.slots.offhand;
-    const allowed = s.wtype ? [s.wtype].flat() : [];
-    const weapon = main ? w.item(main.name)?.wtype : void 0;
-    if (allowed.length && !allowed.includes(weapon || "")) return false;
-    if (!offhandMatches(w, s, off?.name)) return false;
-    return slotsMatch(w, s);
-  }
-  function offhandMatches(w, s, name) {
-    return !s.offhand_type || !!name && w.item(name)?.type === s.offhand_type;
-  }
-  function slotsMatch(w, s) {
-    return !s.slot || s.slot.some(([slot, name]) => {
-      const item = w.actor.slots[slot];
-      if (item?.name !== name) return false;
-      return (item.charges || 0) >= (w.item(name)?.charge || 0);
-    });
-  }
-  function unlocked(w, id) {
-    const s = w.skills[id];
-    if (!s || s.type === "passive" || s.consume) return false;
-    if (s.class && !s.class.includes(w.actor.ctype)) return false;
-    if (w.actor.level < (s.level || 0) || !equipment(w, s)) return false;
-    return Object.entries(s.requirements || {}).every(([key, value]) => Number(Reflect.get(w.actor, key)) >= Number(value));
-  }
-  function reserve(w) {
-    if (!!w.context.farmingScript) return 0;
-    const availableCost = (id) => unlocked(w, id) ? cost(w, id) : 0;
-    const c = w.actor.ctype;
-    if (c === "paladin") return Math.max(w.actor.max_mp * 0.3, 2 * availableCost("selfheal") + availableCost("guardians_oath"));
-    if (c === "priest") return Math.max(w.actor.max_mp * 0.35, 2 * cost(w, "heal") + availableCost("partyheal"));
-    if (c === "warrior") return (w.context.leader === w.actor.name ? availableCost("taunt") : 0) + Math.max(availableCost("stomp"), availableCost("hardshell"));
-    return w.actor.max_mp * 0.2;
-  }
-  function targetBlock(w, d) {
-    const s = w.skills[d.skill];
-    for (const target of d.targets) {
-      if (!living(target)) return "target dead";
-      if (s.no_self && target.name === w.actor.name) return "cannot target self";
-      if (!w.range(target, d.skill)) return "out of range";
-      if (s.hostile && !hostileAllowed(w, d, target)) return "unauthorized or immune target";
-    }
-    return safePull(w, d) ? null : "unsafe combined pull";
-  }
-  var living = (target) => !target.dead && !target.rip && target.hp > 0;
-  function hostileAllowed(w, d, target) {
-    return w.allowed(target, d.skill) && (!target.immune || !!w.skills[d.skill]?.pierces_immunity);
-  }
-  function safePull(w, d) {
-    if (w.context.mode !== "scatter" || !w.skills[d.skill]?.hostile) return true;
-    const pulled = new Set(d.targets.filter((t) => !t.target).map((t) => t.id));
-    if (!pulled.size) return true;
-    const context = { ...w.context, monsters: w.context.monsters.map((m) => pulled.has(m.id) ? { ...m, target: w.actor.name } : m) };
-    return w.actor.hp - incomingDps({ ...w, context }, w.actor) * 2 > w.actor.max_hp * 0.3;
-  }
-  function blocked(w, d, pending = 0) {
-    if (w.context.mode === "blocked" || w.actor.rip) return "combat activity blocked";
-    if (!ownsAggro(w, d)) return "leader owns aggro transfers";
-    if (!unlocked(w, d.skill)) return "level, equipment, or requirements";
-    const s = w.skills[d.skill];
-    if (w.cooldown(d.skill) || w.cooldown(s.share || d.skill)) return "cooldown";
-    return manaBlock(w, d, pending) || targetBlock(w, d);
-  }
-  function ownsAggro(w, d) {
-    return !["absorb", "taunt", "agitate"].includes(d.skill) || w.context.leader === w.actor.name;
-  }
-  function manaBlock(w, d, pending) {
-    const remaining = w.actor.mp - pending - cost(w, d.skill);
-    if (remaining < 0) return "insufficient MP";
-    if (d.category !== "survival" && remaining < reserve(w)) return "survival MP reserved";
-    return null;
-  }
-
-  // runtime/characters/skills/offense.ts
-  function attackChoices(w, primary) {
-    const ids = w.actor.ctype === "ranger" ? ["piercingshot", "3shot", "5shot"] : w.actor.ctype === "rogue" ? ["fanofknives"] : [];
-    return ids.map((id) => {
-      const cap = w.skills[id]?.max_targets || (id === "5shot" || id === "fanofknives" ? 5 : id === "3shot" ? 3 : 1);
-      const targets = [primary, ...w.context.monsters.filter((t) => t.id !== primary.id)].filter((t) => !blocked(w, decision(id, [t]))).sort((a, b) => Number(b.id === primary.id) - Number(a.id === primary.id) || usefulDamage(w, id, b) - usefulDamage(w, id, a) || a.id.localeCompare(b.id)).slice(0, cap);
-      return decision(id, targets);
-    }).filter((d) => d.targets.some((t) => t.id === primary.id));
-  }
-  function bestAttack(w, primary, affordable) {
-    const baseline = usefulDamage(w, "attack", primary);
-    const options = attackChoices(w, primary).filter(affordable).map((d) => ({
-      d,
-      score: d.targets.reduce((sum, t) => sum + usefulDamage(w, d.skill, t), 0)
-    }));
-    options.sort((a, b) => b.score - a.score || cost(w, a.d.skill) - cost(w, b.d.skill));
-    return options[0]?.score > baseline ? options[0].d : null;
-  }
-  function purifyUseful(w, target) {
-    if (damage(w, "purify", target, true) >= target.hp) return true;
-    return !purifiable(w, target).some((id) => w.condition(id)?.debuff || w.condition(id)?.bad);
-  }
-  function independentUseful(w, id, target) {
-    const remaining = target.hp - w.incoming(target);
-    if (remaining <= 0) return false;
-    if (id === "purify") return purifyUseful(w, target);
-    if (id === "huntersmark") return markUseful(w, target, remaining);
-    if (id === "supershot") return remaining >= damage(w, id, target) * 0.5;
-    return true;
-  }
-  function markUseful(w, target, remaining) {
-    const owner = w.context.allies.filter((a) => a.ctype === "ranger" && a.mp >= cost(w, "huntersmark") && w.range(a, "huntersmark")).sort((a, b) => a.name.localeCompare(b.name))[0];
-    return owner?.name === w.actor.name && !target.s?.marked && remaining >= damage(w, "attack", target) * Math.max(1, w.actor.frequency) * 3;
-  }
-  function damageChoices(w, target) {
-    const classes = {
-      ranger: ["huntersmark", "supershot"],
-      rogue: ["mentalburst", "quickstab", "quickpunch"],
-      paladin: ["purify", "shield_slam", "smash"]
-    };
-    const choices = (classes[w.actor.ctype] || []).filter((id) => independentUseful(w, id, target)).map((id) => decision(id, [target])).filter((d) => !blocked(w, d));
-    const score = (d) => {
-      if (d.skill === "mentalburst" && damage(w, d.skill, target, true) >= target.hp) return Infinity;
-      if (d.skill === "huntersmark") return Number.MAX_SAFE_INTEGER;
-      const divisor = w.context.mode === "event" ? (w.skills[d.skill]?.cooldown || 1e3) / 1e3 : Math.max(1, cost(w, d.skill));
-      return usefulDamage(w, d.skill, target) / divisor;
-    };
-    return choices.sort((a, b) => score(b) - score(a));
-  }
-
-  // runtime/characters/farming/rogue-knives.ts
-  function focused(w, t) {
-    return w.context.farmingScript === "lone-crab" ? t.mtype === "crab" : !!w.context.farmingFocus?.includes(t.mtype);
-  }
-  function eligibleTargets(w) {
-    return w.context.monsters.filter((t) => focused(w, t) && t.visible !== false && !t.dead && !t.rip && t.hp > w.incoming(t) && w.allowed(t, "fanofknives") && (!t.immune || w.skills.fanofknives?.pierces_immunity));
-  }
-  function createRogueKnifePositioner(ports) {
-    let region = "", centered = false, planAt = 0;
-    let moving = null;
-    const length = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
-    function reset() {
-      region = "";
-      centered = false;
-      planAt = 0;
-      moving = null;
-      ports.report(null);
-    }
-    function sample(w, center) {
-      const visible = w.context.monsters.filter((t) => focused(w, t) && t.visible !== false && !t.dead && t.hp > 0 && w.allowed(t, "fanofknives"));
-      const eligible = eligibleTargets(w), cap = w.skills.fanofknives?.max_targets || 5;
-      const range = w.skills.fanofknives?.range || 160;
-      const count = (point) => {
-        const actor = { ...w.actor, x: point.x, y: point.y, real_x: point.x, real_y: point.y };
-        return Math.min(cap, eligible.filter((t) => distance(actor, t) <= range).length);
-      };
-      const here = { map: w.actor.map, x: w.actor.x, y: w.actor.y }, current = count(here);
-      function report(point, reason) {
-        ports.report({
-          at: w.now,
-          visible: visible.length,
-          inRegion: visible.filter((t) => ports.contains({ map: w.actor.map, x: t.x, y: t.y })).length,
-          inRange: eligible.filter((t) => w.range(t, "fanofknives")).length,
-          maxTargets: cap,
-          expectedTargets: count(point),
-          destination: point,
-          holdUntil: moving?.holdUntil || 0,
-          reason
-        });
-      }
-      return { center, eligible, cap, count, here, current, report };
-    }
-    return {
-      reset,
-      held() {
-        if (!moving || Date.now() >= moving.holdUntil || !ports.center()) return false;
-        const w = ports.world();
-        if (w.context.farmingScript === "lone-crab" && (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0)) return false;
-        return !!w.context.farmingScript && eligibleTargets(w).filter((t) => w.range(t, "fanofknives")).length <= 2;
-      },
-      tick() {
-        const center = ports.center(), w = ports.world();
-        if (!center || !w.context.farmingScript || w.context.mode === "blocked") {
-          reset();
-          return false;
-        }
-        const key = JSON.stringify([w.context.farmingScript, w.context.farmingFocus, center]);
-        if (key !== region) {
-          reset();
-          region = key;
-        }
-        const s = sample(w, center);
-        const refresh = ports.auraRecovery(w.actor);
-        if (refresh) {
-          moving = null;
-          planAt = 0;
-          s.report(refresh, "refreshing Kane aura");
-          return ports.move(refresh);
-        }
-        if (!centered) {
-          centered = length(s.here, center) <= 2;
-          s.report(center, "spawn center");
-          return ports.move(center);
-        }
-        if (s.current >= 3) {
-          moving = null;
-          s.report(s.here, "enough targets");
-          return ports.move(s.here);
-        }
-        if (moving) {
-          if (w.now < moving.deadline && length(s.here, moving.point) > 2 && s.count(moving.point) >= s.current + 2 && ports.contains(moving.point) && ports.canMove(moving.point)) {
-            s.report(moving.point, "better batch");
-            return ports.move(moving.point);
-          }
-          moving = null;
-        }
-        if (w.now < planAt || !unlocked(w, "fanofknives") || w.actor.mp < cost(w, "fanofknives")) {
-          s.report(s.here, "no worthwhile move");
-          return ports.move(s.here);
-        }
-        planAt = w.now + 500;
-        const seconds = Math.min(1, (ports.cooldownRemaining() + 250) / 1e3);
-        const radius = Math.max(0, w.actor.speed) * seconds;
-        let best = s.here;
-        let bestCount = s.current, bestDistance = 0;
-        const candidates = [];
-        for (const fraction of [1 / 3, 2 / 3, 1]) for (let angle = 0; angle < 16; angle++) {
-          const radians = angle * Math.PI / 8;
-          candidates.push({
-            map: center.map,
-            x: s.here.x + Math.cos(radians) * radius * fraction,
-            y: s.here.y + Math.sin(radians) * radius * fraction
-          });
-        }
-        for (const point of candidates) {
-          const travel = length(s.here, point);
-          if (travel < 2 || !ports.contains(point) || !ports.canMove(point)) continue;
-          const count = s.count(point);
-          if (count > bestCount || count === bestCount && travel < bestDistance) {
-            best = point;
-            bestCount = count;
-            bestDistance = travel;
-          }
-        }
-        if (bestCount >= s.current + 2) {
-          moving = { point: best, deadline: w.now + seconds * 1e3, holdUntil: w.now + Math.min(250, bestDistance / Math.max(1, w.actor.speed) * 1e3) };
-          s.report(best, "better batch");
-          return ports.move(best);
-        }
-        s.report(s.here, s.eligible.length ? "no worthwhile move" : "waiting for targets");
-        return ports.move(s.here);
-      }
-    };
-  }
-  function rogueKnifeAttack(w) {
-    const cap = w.skills.fanofknives?.max_targets || 5;
-    const targets = eligibleTargets(w).filter((t) => !blocked(w, decision("fanofknives", [t]))).sort((a, b) => Math.hypot(a.x - w.actor.x, a.y - w.actor.y) - Math.hypot(b.x - w.actor.x, b.y - w.actor.y) || a.id.localeCompare(b.id)).slice(0, cap);
-    return targets.length ? decision("fanofknives", targets, "damage", "rogue knife farm") : null;
-  }
-
-  // runtime/characters/skills/protection.ts
-  function absorbDecision(w) {
-    if (w.actor.ctype !== "priest" || w.context.leader !== w.actor.name) return null;
-    if (w.actor.mp - cost(w, "absorb") < cost(w, "heal")) return null;
-    const ally = w.context.allies.filter((a) => a.name !== w.actor.name && w.context.monsters.some((m) => m.target === a.name) && safeTransfer(w, a)).sort((a, b) => health(a) - health(b) || a.name.localeCompare(b.name)).find((a) => w.range(a, "absorb"));
-    return ally ? decision("absorb", [ally], "survival", "leader aggro rescue") : null;
-  }
-  function selfHeal(w) {
-    const output = (w.skills.selfheal?.levels || [[0, w.skills.selfheal?.output || 400]]).filter(([level]) => level <= w.actor.level).at(-1)?.[1] || 400;
-    if (health(w.actor) < 0.7 || w.actor.max_hp - w.actor.hp >= output * 0.8)
-      return decision("selfheal", [], "survival", "self healing");
-    return null;
-  }
-  function cleanse(w) {
-    const candidates = w.context.allies.filter((a) => a.name !== w.actor.name && w.range(a, "cleansing_light")).filter((a) => Object.keys(a.s || {}).some((id) => w.condition(id)?.cleansable)).sort((a, b) => Number(endangered(w, b)) - Number(endangered(w, a)) || Number(b.name === w.context.leader) - Number(a.name === w.context.leader) || health(a) - health(b));
-    const ally = candidates[0];
-    if (!ally) return null;
-    const urgent = endangered(w, ally) || Object.keys(ally.s).some((id) => ["stunned", "frozen", "deepfreezed", "tangled", "poisoned", "burned"].includes(id));
-    return decision("cleansing_light", [ally], urgent ? "survival" : "maintenance", "cleanse harmful conditions");
-  }
-  function oath(w) {
-    const outgoing = w.context.allies.some((a) => {
-      const s = a.s?.guardians_oath;
-      return s?.f === w.actor.name || s?.from === w.actor.name;
-    });
-    if (outgoing) return null;
-    const ally = w.context.allies.filter((a) => a.name !== w.actor.name && !a.s?.guardians_oath).filter((a) => w.range(a, "guardians_oath") && endangered(w, a) && safeTransfer(w, a, 0.35)).sort((a, b) => health(a) - health(b) || Number(b.name === w.context.leader) - Number(a.name === w.context.leader))[0];
-    return ally ? decision("guardians_oath", [ally], "survival", "protect endangered ally") : null;
-  }
-  function beacon(w) {
-    const nearby = w.context.allies.filter((a) => w.range(a, "beacon_of_resolve"));
-    if (nearby.some((a) => a.s?.beacon_of_resolve)) return null;
-    const leader = nearby.find((a) => a.name === w.context.leader);
-    const urgent = !!leader && leader.hp - incomingDps(w, leader) * 2 < leader.max_hp * 0.3;
-    if (!urgent && nearby.filter((a) => incomingDps(w, a) > 0).length < 2) return null;
-    return decision("beacon_of_resolve", [], urgent ? "survival" : "maintenance", "party defensive burst");
-  }
-  function shield(w) {
-    const mana = !!w.actor.s?.mshield;
-    const incoming = incomingDps(w, w.actor);
-    if (mana && (health(w.actor) > 0.65 || w.actor.mp <= reserve(w)))
-      return decision("mshield", [], "survival", "release mana shield");
-    if (!mana && health(w.actor) < 0.4 && incoming > 0 && w.actor.mp > reserve(w))
-      return decision("mshield", [], "survival", "emergency mana shield");
-    return aetherShield(w, incoming);
-  }
-  function aetherShield(w, incoming) {
-    const magic = w.context.monsters.some((m) => m.target === w.actor.name && m.damage_type === "magical");
-    if (!w.actor.s.mshield && !w.actor.s.aether_shield && magic && w.actor.hp - incoming * 2 > w.actor.max_hp * 0.3 && w.actor.mp < w.actor.max_mp)
-      return decision("aether_shield", [], "maintenance", "recover mana from magical wounds");
-    return null;
-  }
-  function desiredAuras(w) {
-    const threatening = w.context.monsters.filter((m) => w.context.allies.some((a) => a.name === m.target));
-    const conditionPressure = w.context.allies.some((a) => Object.keys(a.s || {}).some((id) => w.condition(id)?.cleansable));
-    if (conditionPressure) return ["warding", "bulwark", "sanctuary", "zeal"];
-    const magical = threatening.filter((m) => m.damage_type === "magical").length > threatening.length / 2;
-    return magical ? ["sanctuary", "zeal", "bulwark", "warding"] : ["bulwark", "zeal", "sanctuary", "warding"];
-  }
-  function aura(w) {
-    if (!unlocked(w, "paladin_aura")) return null;
-    const paladins = w.context.allies.filter((a) => a.ctype === "paladin" && a.level >= (w.skills.paladin_aura?.level || 60) && w.range(a, "paladin_aura")).sort((a, b) => Number(b.name === w.context.leader) - Number(a.name === w.context.leader) || b.level - a.level || a.name.localeCompare(b.name));
-    const choices = desiredAuras(w);
-    if (!paladins.some((a) => a.name === w.context.leader)) choices.unshift(...choices.splice(choices.indexOf("zeal"), 1));
-    const state = choices[Math.max(0, paladins.findIndex((a) => a.name === w.actor.name)) % choices.length];
-    const own = w.actor.s?.["paladin_aura_" + state];
-    if (own && (own.f === w.actor.name || own.from === w.actor.name)) return null;
-    return { ...decision("paladin_aura", [], "maintenance", "party aura coverage"), argument: state };
-  }
-  function paladinSupport(w) {
-    return [selfHeal(w), shield(w), cleanse(w), oath(w), beacon(w), aura(w)].filter((d) => !!d);
-  }
-  function rogueSupport(w) {
-    const rogues = w.context.allies.filter((a) => a.ctype === "rogue" && a.level >= 40).sort((a, b) => a.name.localeCompare(b.name));
-    if (rogues[0]?.name !== w.actor.name) return [];
-    const target = w.context.allies.find((a) => (!a.s?.rspeed || (a.s.rspeed.ms || 0) < 6e4) && w.range(a, "rspeed"));
-    return target ? [decision("rspeed", [target], "maintenance", "maintain party swiftness")] : [];
-  }
-  function combatBuffSupport(w) {
-    const skill = w.actor.ctype === "warrior" ? "warcry" : w.actor.ctype === "priest" ? "darkblessing" : null;
-    if (!skill || w.actor.s?.[skill]) return [];
-    return [decision(skill, [], "maintenance", "maintain combat buff")];
-  }
-  function opener(w, target) {
-    if (w.actor.ctype !== "rogue" || w.actor.s?.invis || w.actor.s?.marked) return null;
-    if (target.target || w.context.monsters.some((m) => m.target === w.actor.name)) return null;
-    return decision("invis", [], "maintenance", "unengaged opener");
-  }
-
-  // runtime/characters/skills/engine.ts
-  function createSkillEngine(ports) {
-    const budget = createManaBudget(), pending = /* @__PURE__ */ new Map();
-    let epoch = 0, stopped = false, auraAt = -Infinity, auraState = "", openerPending = false;
-    const failures = /* @__PURE__ */ new Map();
-    function world() {
-      const w = ports.world();
-      for (const [id, p] of pending) if (p.until <= w.now && !w.cooldown(id)) pending.delete(id);
-      return w;
-    }
-    const family = (w, id) => w.skills[id]?.share || id;
-    function report(w, d, status, reason = d.reason) {
-      ports.diagnostic({
-        at: w.now,
-        skill: d.skill,
-        targets: d.targets.map((t) => t.id || t.name),
-        category: d.category,
-        reserve: reserve(w),
-        reason,
-        status
-      });
-    }
-    function affordable(w, d) {
-      const inFlight = [...pending.values()].reduce((n, p) => n + p.cost, 0);
-      const reason = blocked(w, d, inFlight);
-      if (reason) {
-        report(w, d, "skipped", reason);
-        return false;
-      }
-      if (pending.has(family(w, d.skill)) || (failures.get(d.skill) || 0) > w.now) return false;
-      const cap = Math.max(0, ...Object.keys(w.skills).map((id) => id).filter((id) => unlocked(w, id) && cost(w, id) <= w.actor.mp - reserve(w)).map((id) => cost(w, id)));
-      const credit = budget.observe(w.now, w.actor.mp, w.actor.mp - reserve(w), cap);
-      if (d.category === "damage" && w.context.mode !== "event" && !(!!w.context.farmingScript && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
-        report(w, d, "skipped", "sustained farming MP budget");
-        return false;
-      }
-      return true;
-    }
-    function settle(d, actions, result) {
-      const response = result;
-      const accepted = new Set(response?.targets || (response?.target ? [response.target] : []));
-      d.targets.forEach((t, i) => {
-        if (!actions[i]) return;
-        const success = accepted.has(t.id) || !response?.targets && d.targets.length === 1;
-        ports.evidence(t, success ? "engaged" : "rejected", actions[i]);
-      });
-    }
-    function rejectActions(d, actions) {
-      actions.forEach((a, i) => {
-        if (a) ports.evidence(d.targets[i], "rejected", a);
-      });
-    }
-    function recordAura(w, d) {
-      if (d.skill === "paladin_aura") {
-        auraAt = w.now;
-        auraState = d.argument || "";
-      }
-    }
-    async function execute(d) {
-      const w = world();
-      if (stopped || !affordable(w, d)) return false;
-      const id = family(w, d.skill), amount = cost(w, d.skill);
-      const token = { epoch, cost: amount, until: w.now + 2500 };
-      pending.set(id, token);
-      if (d.category === "damage") budget.debit(amount);
-      const actions = d.targets.map((t) => w.skills[d.skill]?.hostile ? ports.evidence(t, "pending") : null);
-      report(w, d, "selected");
-      let timeout;
-      try {
-        const result = await Promise.race([ports.cast(d), new Promise((_, reject) => {
-          timeout = setTimeout(() => reject(new Error("skill acknowledgement timeout")), 2500);
-        })]);
-        if (epoch !== token.epoch || stopped) return false;
-        settle(d, actions, result);
-        recordAura(w, d);
-        report(w, d, "accepted");
-        return true;
-      } catch (error) {
-        rejectActions(d, actions);
-        if (epoch !== token.epoch || stopped) return false;
-        failures.set(d.skill, ports.world().now + 1e3);
-        report(w, d, "rejected", errorReason(error));
-        return false;
-      } finally {
-        clearTimeout(timeout);
-        if (pending.get(id) === token) pending.delete(id);
-      }
-    }
-    async function first(choices) {
-      const w = world();
-      const d = choices.find((d2) => affordable(w, d2));
-      return d ? execute(d) : false;
-    }
-    return {
-      ready(d) {
-        return affordable(world(), d);
-      },
-      cast: execute,
-      async absorb() {
-        const d = absorbDecision(world());
-        return d ? execute(d) : false;
-      },
-      support() {
-        const w = world();
-        if (!!w.context.farmingScript) return Promise.resolve(false);
-        const choices = w.actor.ctype === "paladin" ? paladinSupport(w) : w.actor.ctype === "rogue" ? rogueSupport(w) : combatBuffSupport(w);
-        return first(choices.filter((d) => d.skill !== "paladin_aura" || w.now - auraAt >= 1e4 && d.argument !== auraState));
-      },
-      offense(target) {
-        const w = world();
-        if (!!w.context.farmingScript) return Promise.resolve(false);
-        return first(damageChoices(w, target));
-      },
-      attack(target) {
-        const w = world();
-        if (w.context.mode === "blocked" || !["ranger", "rogue"].includes(w.actor.ctype)) return null;
-        if (!!w.context.farmingScript) {
-          if (ports.rogueKnifeAttackHeld?.()) return Promise.resolve(false);
-          const d2 = rogueKnifeAttack(w);
-          return d2 ? execute(d2) : Promise.resolve(false);
-        }
-        const opening = opener(w, target);
-        if (opening && affordable(w, opening)) {
-          openerPending = true;
-          return execute(opening).finally(() => {
-            openerPending = false;
-          });
-        }
-        const d = bestAttack(w, target, (d2) => affordable(w, d2));
-        return d ? execute(d) : null;
-      },
-      busy() {
-        world();
-        return openerPending || pending.has("attack");
-      },
-      reset() {
-        epoch++;
-        budget.reset();
-        auraAt = -Infinity;
-        auraState = "";
-      },
-      stop() {
-        stopped = true;
-        epoch++;
-      }
-    };
-  }
-
-  // runtime/characters/skills/projectiles.ts
-  function usable(data) {
-    return !!data.pid && !!data.target && Number(data.damage) > 0 && Number(data.eta) > 0;
-  }
-  function createProjectileTracker(world) {
-    const flights = /* @__PURE__ */ new Map();
-    function prune(now) {
-      for (const [id, p] of flights) if (p.until <= now) flights.delete(id);
-    }
-    return {
-      action(data) {
-        const w = world();
-        prune(w.now);
-        if (!usable(data)) return;
-        if (!w.context.allies.some((a) => a.name === data.attacker || a.id === data.attacker)) return;
-        const target = w.context.monsters.find((t) => t.id === data.target);
-        if (!target) return;
-        const definition = Object.entries(w.skills).find(([id]) => id === data.type)?.[1];
-        const defense = definition?.damage_type === "magical" ? target.resistance : target.armor;
-        const factor = definition?.damage_type === "pure" ? 1 : w.damageMultiplier(Number(defense) || 0);
-        flights.set(data.pid, { target: data.target, amount: Number(data.damage) * factor * 0.9, until: w.now + Number(data.eta) });
-      },
-      hit(data) {
-        if (data.pid) flights.delete(data.pid);
-      },
-      incoming(target, now) {
-        prune(now);
-        return [...flights.values()].filter((p) => p.target === target).reduce((n, p) => n + p.amount, 0);
-      },
-      clear() {
-        flights.clear();
-      }
-    };
-  }
-
-  // runtime/characters/farming/kane-aura.ts
-  var AURA_RANGE = 320;
-  function createKaneAuraRecovery(ports) {
-    let lastSeen = null;
-    return {
-      destination(actor) {
-        if (lastSeen && (lastSeen.map !== actor.map || lastSeen.in !== actor.in)) lastSeen = null;
-        const kane = Object.values(ports.entities()).find((e) => "npc" in e && e.npc === "citizen0" && e.visible !== false && !e.dead && !e.rip && (!e.map || e.map === actor.map) && (e.in == null || e.in === actor.in));
-        if (kane) lastSeen = {
-          ...kane,
-          map: actor.map,
-          in: actor.in,
-          x: kane.real_x ?? kane.x,
-          y: kane.real_y ?? kane.y
-        };
-        const npc = kane || lastSeen;
-        const buff = actor.s.citizen0aura;
-        if (buff && (buff.ms == null || buff.ms > 0) || !npc) return null;
-        const here = { map: actor.map, x: actor.real_x ?? actor.x, y: actor.real_y ?? actor.y };
-        if (distance(actor, npc) < AURA_RANGE) return here;
-        const x = npc.real_x ?? npc.x, y = npc.real_y ?? npc.y;
-        const halfWidth = (ports.width(actor) + ports.width(npc)) / 2;
-        const nearest = {
-          x: Math.max(x - halfWidth, Math.min(x + halfWidth, here.x)),
-          y: Math.max(y - ports.height(npc), Math.min(y + ports.height(actor), here.y))
-        };
-        const dx = here.x - nearest.x, dy = here.y - nearest.y, gap = Math.hypot(dx, dy);
-        const ratio = Math.min(1, (AURA_RANGE - 1) / Math.max(1, gap));
-        const projected = { map: actor.map, x: nearest.x + dx * ratio, y: nearest.y + dy * ratio };
-        const reachable = (point) => ports.canMove(point) && distance({ ...actor, x: point.x, y: point.y, real_x: point.x, real_y: point.y }, npc) < AURA_RANGE;
-        if (reachable(projected)) return projected;
-        const candidates = [{ map: actor.map, x, y }];
-        for (const radius of [319, 239, 159, 79]) for (let i = 0; i < 64; i++) {
-          const angle = i * Math.PI / 32;
-          candidates.push({ map: actor.map, x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius });
-        }
-        return candidates.filter(reachable).sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y))[0] || here;
-      }
-    };
-  }
-
-  // runtime/characters/skills/runtime.ts
-  function mitigation2(defense) {
-    const rates = [1e-3, 1e-3, 95e-5, 9e-4, 82e-5, 7e-4, 6e-4, 5e-4];
-    const reduction = rates.reduce((sum, rate, i) => sum + Math.max(0, Math.min(100, defense - i * 100)) * rate, 0) + Math.max(0, defense - 800) * 4e-4;
-    const piercing = [1e-3, 75e-5, 5e-4].reduce((sum, rate, i) => sum + Math.max(0, Math.min(50, -defense - i * 50)) * rate, 0) + Math.max(0, -defense - 150) * 25e-5;
-    return Math.min(1.32, Math.max(0.05, 1 - reduction + piercing));
-  }
-  function installSkillRuntime(root) {
-    const host = parent;
-    const shared = root.sharedRoutine;
-    const projectiles = createProjectileTracker(world);
-    function world() {
-      const actor = character;
-      const context = shared.combatContext?.() || {
-        leader: "",
-        allies: [],
-        monsters: [],
-        mode: "blocked",
-        event: null,
-        observedAt: 0
-      };
-      if (host.is_disabled?.(actor)) context.mode = "blocked";
-      const skills = G.skills;
-      const result = {
-        actor,
-        context,
-        skills,
-        now: Date.now(),
-        item: (name) => G.items[name],
-        condition: (name) => G.conditions[name],
-        cooldown: (id) => id === "invis" && !!shared.merchantVisibilityActive?.() || Number(host.next_skill?.[id]) > Date.now(),
-        damageMultiplier: host.damage_multiplier || mitigation2,
-        incoming: (t) => projectiles.incoming(t.id, Date.now()),
-        range: (t, id) => skillRange(actor, t, skills[id]),
-        allowed: (t, id) => authorized(result, t, id)
-      };
-      return result;
-    }
-    function authorized(w, t, id) {
-      if (returnTargetBlocked(t, id) || frankySkillBlocked(id, [t])) return false;
-      const type = w.skills[id]?.damage_type || "physical";
-      if (id !== "taunt" && monsterAttackBlock(t.mtype, type, w.actor.range)) return false;
-      if (!targetAuthorized(t, id)) return false;
-      if (t.target || w.context.mode !== "scatter") return true;
-      const added = { ...w.context, monsters: w.context.monsters.map((m) => m.id === t.id ? { ...m, target: w.actor.name } : m) };
-      return w.actor.hp - 2 * incomingDps({ ...w, context: added }, w.actor) > w.actor.max_hp * 0.3;
-    }
-    function targetAuthorized(t, id) {
-      return !!shared.skillTargetAllowed?.(t) && shared.rareAttackAllowed?.(t, id) !== false;
-    }
-    const returnExcluded = /* @__PURE__ */ new Set(["taunt", "agitate", "charge", "dash", "blink", "scare", "stomp", "cleave", "fanofknives"]);
-    function returnTargetBlocked(t, id) {
-      return !!shared.returnCombatActive?.() && (returnExcluded.has(id) || !shared.returnAttacker?.(t));
-    }
-    function returnCastBlocked(d) {
-      if (!shared.returnCombatActive?.()) return false;
-      if (returnExcluded.has(d.skill)) return true;
-      return !!world().skills[d.skill]?.hostile && d.targets.some((t) => !shared.returnAttacker?.(t));
-    }
-    const frankyExcluded = /* @__PURE__ */ new Set(["agitate", "charge", "dash", "blink", "scare", "stomp", "cleave", "fanofknives"]);
-    function frankySkillBlocked(id, targets) {
-      if (!shared.frankyCombatActive?.()) return false;
-      return frankyExcluded.has(id) || !!world().skills[id]?.hostile && targets.some((t) => t.type !== "monster" || t.mtype !== "franky" || !shared.skillTargetAllowed?.(t));
-    }
-    function castSkill(d) {
-      if (frankySkillBlocked(d.skill, d.targets)) return Promise.reject(new Error("Skill conflicts with Franky-only combat"));
-      if (returnCastBlocked(d)) return Promise.reject(new Error("Skill conflicts with return movement or attacker-only policy"));
-      const argument = d.argument ?? (d.targets.length > 1 || world().skills[d.skill]?.multi ? d.targets.map((t) => t.id) : d.targets[0]?.id || d.targets[0]?.name);
-      return host.use_skill(d.skill, argument);
-    }
-    const kaneAura = createKaneAuraRecovery({
-      entities: () => host.entities,
-      width: (entity) => host.get_width(entity),
-      height: (entity) => host.get_height(entity),
-      canMove: (point) => can_move_to(point.x, point.y)
-    });
-    const knifePositioner = createRogueKnifePositioner({
-      world,
-      center: () => shared.rogueKnifeFarm?.() || null,
-      auraRecovery: (actor) => world().context.farmingScript === "lone-crab" ? kaneAura.destination(actor) : null,
-      contains: (point) => shared.rogueKnifeFarmContains?.(point) ?? false,
-      canMove: (point) => can_move_to(point.x, point.y),
-      move: (point) => shared.rogueKnifeFarmMove?.(point) ?? false,
-      cooldownRemaining: () => Math.max(0, Number(host.next_skill?.attack) - Date.now()) || 0,
-      report: (diagnostic) => {
-        if (root.partyCombatState) root.partyCombatState.crabFarm = diagnostic;
-      }
-    });
-    const engine = createSkillEngine({
-      rogueKnifeAttackHeld: () => knifePositioner.held(),
-      world,
-      cast: castSkill,
-      evidence: (t, state, action2) => shared.queueEvidence?.(t, state, action2) || null,
-      diagnostic: (d) => {
-        if (root.partyCombatState) root.partyCombatState.skill = d;
-      }
-    });
-    shared.skillSupport = () => engine.support();
-    shared.skillOffense = (t) => engine.offense(t);
-    shared.absorbLeaderAggro = () => engine.absorb();
-    if (shared.combatContext) {
-      shared.combatSkillReady = (id, target, category) => engine.ready(decision(id, [target], category));
-      shared.castCombatSkill = (id, target, category) => engine.cast(decision(id, [target], category));
-    }
-    const action = (data) => projectiles.action(data);
-    const hit = (data) => projectiles.hit(data);
-    host.socket?.on?.("action", action);
-    host.socket?.on?.("hit", hit);
-    return {
-      ...engine,
-      farmMovement: () => knifePositioner.tick(),
-      reset() {
-        engine.reset();
-        projectiles.clear();
-        knifePositioner.reset();
-      },
-      stop() {
-        engine.stop();
-        projectiles.clear();
-        knifePositioner.reset();
-        host.socket?.off?.("action", action);
-        host.socket?.off?.("hit", hit);
-      }
-    };
-  }
-  function skillRange(actor, target, s) {
-    if (!s) return false;
-    const base = s.use_range ? actor.range : s.range || actor.range;
-    const range = base * (s.range_multiplier || 1) + (s.range_bonus || 0);
-    const distanceTo = typeof distance === "function" ? distance(actor, target) : Math.hypot(actor.x - target.x, actor.y - target.y);
-    return distanceTo <= range;
   }
 
   // runtime/combat/lost-target.ts
@@ -2762,6 +3114,8 @@
     root.partyMerchantAnniversaryControl = merchantAnniversaryControl;
     root.partyRoleRunner?.stop();
     let equipment2 = null;
+    let itemSwaps = null;
+    let autoConsumable = null;
     function resolvedRole() {
       return { ...defaultRole, ...classRole };
     }
@@ -2798,7 +3152,7 @@
       passing: (target) => target.id !== currentTarget()?.id && target.id === passingTarget()?.id,
       preparePassing: (target) => queueClient?.preparePassing(target) ?? false,
       state: () => root.partyCombatState,
-      equipmentBusy: () => !!equipment2?.busy(),
+      equipmentBusy: () => !!equipment2?.busy() || !!itemSwaps?.busy(),
       skillAttack: (target) => skills?.attack(target) ?? null,
       skillBusy: () => skills?.busy() ?? false,
       report: reportError
@@ -2938,6 +3292,8 @@
       root.sharedRoutine?.resetCombatMovement?.();
     }
     function equipmentTick() {
+      itemSwaps?.tick(!character.rip && combatAllowed());
+      if (itemSwaps?.busy() || itemSwaps?.ownsEquipment()) return;
       const actor = character;
       const target = sharedRoutine.equipmentTarget ? sharedRoutine.equipmentTarget() : currentTarget();
       equipment2?.tick(target, actor.damage_type, Number(character.range), combatAllowed());
@@ -2954,12 +3310,12 @@
     }
     function movementTick() {
       const dungeon = !!sharedRoutine.dungeonOwned?.();
-      if (dungeon && !combatAllowed()) {
-        root.sharedRoutine?.resetCombatMovement?.();
-        return;
-      }
       try {
         equipmentTick();
+        if (dungeon && !combatAllowed()) {
+          root.sharedRoutine?.resetCombatMovement?.();
+          return;
+        }
         if (!dungeon) {
           if (sharedRoutine.returnCombatActive?.()) {
             sharedRoutine.returnMovementTick?.();
@@ -3090,6 +3446,8 @@
         if (timer) return;
         skills = installSkillRuntime(root);
         equipment2 = installPorcupineEquipment(root);
+        itemSwaps = installItemSwaps(root);
+        autoConsumable = installAutoConsumable(root);
         game_log(character.name + " loaded generic " + resolvedRole().name + " behavior", "#51D2E1");
         active = true;
         root.partyCombatState = { at: Date.now(), stage: "start", error: null };
@@ -3120,6 +3478,8 @@
       stop: function() {
         skills?.stop();
         equipment2?.stop();
+        itemSwaps?.stop();
+        autoConsumable?.stop();
         queueClient?.stop();
         queueMarkers?.stop();
         lootClient?.stop();

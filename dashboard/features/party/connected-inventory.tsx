@@ -224,6 +224,7 @@ export const ConnectedInventory = memo(function ConnectedInventory({
       onCommand={command}
       onTravel={onTravel}
       restockValue={state.restockPolicies?.[name]}
+      autoConsumable={state.autoConsumables?.[name]}
       onSaveRestock={saveRestock}
     />
     <LuckySlotDialog character={name} tracking={luckyTracking} verified={state.luckyUpgradeSlots?.[name]} open={luckySlotOpen} onOpenChange={setLuckySlotOpen} />

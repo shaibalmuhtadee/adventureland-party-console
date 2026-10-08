@@ -11,6 +11,7 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
+  autoConsumable?(): string | null;
   itemSwapSettings?(): import('../../item-swaps.ts').ItemSwap[];
   itemSwapMutationBlocked?(): boolean;
   rogueKnifeFarm?(): { map: string; x: number; y: number } | null;

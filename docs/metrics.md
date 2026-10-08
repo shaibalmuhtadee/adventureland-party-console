@@ -33,8 +33,10 @@ E2E testing, builds, and process restarts remain with the user unless requested.
   are not used as a damage estimate. Damage by other players needs their telemetry.
 - Gold history samples character balances. Net change includes spending, sales,
   donations, mail and external transfers. It is not classified farming income.
-  A combined balance requires every selected character in that interval. Bank
-  history and transaction categories are not included in this first release.
+  Each character starts at its first observed balance in the selected range.
+  Disconnected characters retain their last known gain; joining characters do
+  not add their existing wealth as income. Bank history and transaction
+  categories are not included in this first release.
 - Items acquired counts quantities in native chest outcomes for each recipient.
   Transfers, purchases, banking, exchange rewards and production are excluded.
   Item level and native property/stat variants are retained independently.
@@ -45,26 +47,31 @@ E2E testing, builds, and process restarts remain with the user unless requested.
 
 ## Graph controls
 
-The shared toolbar selects a range, characters, server and party/character
-series. Live advances the displayed range; pausing leaves collection running.
+The shared toolbar selects a range, characters and server.
+Live advances the displayed range; pausing leaves collection running.
 Custom ranges are fixed and limited to 180 days. Reset restores the shared and
 graph filters. Historical disconnected characters remain available.
 
-Kills and DPS have separate monster filters. DPS additionally filters skill and
-averaging duration. Items acquired filters item and switches between cumulative
-lines and quantities per interval. Gold switches between balances and net change.
+Kills and DPS have separate searchable monster filters. DPS also filters skills
+and groups bars by character or skill. Items acquired has a searchable item filter
+and rate units. Gold shows cumulative net gold gained with a character selector.
 Loot and damage breakdowns show horizontal bars; ping shows a time series.
 Cards use a uniform 460-pixel height in two desktop columns and one mobile column.
-Each card has one control row. The estimator searches catalog names, IDs, sets
+Each card has one header with its title, optional counter and Options button.
+Filters, scales, character-series selection and reset live in that menu.
+The estimator searches catalog names, IDs, sets
 and item types, with sprite results and keyboard selection.
 
-Axes name quantities and units. Only major grid lines are drawn. Line segments
-do not bridge missing observations. The Series menu toggles graph lines.
+Charts retain quantity units and tick values, with no generic X-axis titles or
+footer legends. Only major grid lines on the value axis are drawn. Line segments
+do not bridge missing observations. Options toggles character lines and shows
+their colors. Ping always shows separate series for currently logged-in console
+characters, subject to the shared character/server filters.
 Suitable positive graphs offer logarithmic Y scales; zero values become gaps
 in that view, and negative values disable logarithmic scaling.
 
-Charts expand into a keyboard-accessible overlay. Metrics has no data download
-or export controls.
+Metrics has no expand, data download or export controls. Drop-projection
+milestones and assumptions are available in its Options menu.
 
 Kills uses vertical bars by monster. Bar height counts kills in the selected
 time range. The second line beneath each monster name shows its total recorded
@@ -80,9 +87,12 @@ independently of the time range chosen for the bars. The searchable monster
 filter supports multiple choices, including monsters with zero recent kills.
 With many monsters selected, the plot scrolls horizontally to keep labels legible.
 
-DPS draws the raw rate and a separate dashed trailing moving average. The
-average window cannot be smaller than the returned data resolution. Its
-top-right value shows the latest recorded rate while Live is enabled.
+DPS uses vertical bars showing average damage per second over the selected range,
+with retained damage totals below each character or skill and DPS labels above.
+Its top-right counter shows today's filtered damage. Items acquired uses vertical
+quantity bars by item, with retained item totals below and selected-range rates
+above. Its top-right counter shows today's filtered acquisitions. Both charts
+offer logarithmic scales and scroll horizontally when needed.
 The active view refreshes once a second, and characters deliver sealed frames
 once a second. History still uses bounded 10-second buckets; the newest bucket
 updates as each frame arrives.
@@ -189,6 +199,13 @@ Retained totals use an in-memory index rebuilt from durable buckets at startup
 and updated after accepted deaths, expiry and resets. Range/day aggregates read
 the existing bucket index rather than transmitting full history to the browser.
 
+`GET /party-api/metrics/bars` accepts `metric=damage|loot`, grouping by
+`by=character|skill` for damage, the same range/day windows, and optional
+`characters`, `servers`, `monsters`, `skills`, and `items` filters. It returns
+selected-range amounts, retained totals, daily counts and the elapsed duration
+used for rate labels. Damage and loot totals have their own retained-history
+index, maintained through ingestion, expiry and resets.
+
 ## Maintained source
 
 - `runtime/characters/metrics.ts`: capture, outbox and retry lifecycle.
@@ -200,6 +217,9 @@ the existing bucket index rather than transmitting full history to the browser.
   filtering and projections.
 - `dashboard/features/party/metrics-kills.tsx`: categorical kills, monster/rate
   filters, per-bar rates, retained totals and the daily counter.
+- `dashboard/features/party/metrics-measurements.tsx`: DPS and acquisition bars.
+- `dashboard/features/party/metrics-gold.tsx`: per-character balance baselines
+  and cumulative net gold gains.
 - `runtime/metrics/luck.ts`: native Encouragement parsing and the independent
   ordinary/bonus drop model.
 

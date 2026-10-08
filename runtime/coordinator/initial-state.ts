@@ -97,6 +97,7 @@ export function createInitialCoordinatorState<Merchant extends string | null = s
     characterLocations: persistedSettings.characterLocations || {},
     navigationIntents: persistedSettings.navigationIntents || {},
     restockPolicies: persistedSettings.restockPolicies || {},
+    autoConsumables: persistedSettings.autoConsumables || {},
     itemSwaps: validItemSwapMap(persistedSettings.itemSwaps) ? persistedSettings.itemSwaps : {} satisfies ItemSwaps,
     ...initialMerchantRuntime<Merchant>(persistedSettings, ports.merchantDefault),
     ...initialCoordinatorHistory(persistedHistory, persistedSettings),

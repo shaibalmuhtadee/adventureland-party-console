@@ -170,6 +170,10 @@ export function createMerchantScheduling(state: SchedulingState, ports: Scheduli
 
   function collection(report: SchedulingReport): void {
     if (state.merchantAutomations["party collection"] === false) return;
+    if (!Array.isArray(report.items) || freeSlots(report.items) > 7) {
+      delete state.transferSignatures[report.name];
+      return;
+    }
     if (freeSlots(state.statuses[String(state.merchantCharacter)]?.items) <= 3) return;
     const signature = collectionSignature(report);
     if (

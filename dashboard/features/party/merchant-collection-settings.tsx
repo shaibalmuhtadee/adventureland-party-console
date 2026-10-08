@@ -74,9 +74,9 @@ export function MerchantCollectionSettings({buyUpgradeBatchSize, merchantStandLo
               Automatic item collection
             </p>
             <p className="mt-1 text-xs text-slate-300">
-              Start a collection trip when one party member has this many marked inventory slots.
-              Smaller pickups run only while the merchant is within 200 units. Queued pickups and
-              retries recheck this rule. NPC-sale marks count toward this threshold. Manual visits and other merchant jobs still collect
+              Automatic item collection requires seven or fewer empty inventory slots in the fighter's bag.
+              Then this marked-slot threshold applies; smaller pickups run only while the merchant is within 200 units.
+              Queued pickups and retries recheck both limits. NPC-sale marks count toward the marked-slot threshold. Manual visits and other merchant jobs still collect
               immediately.
             </p>
             <div className="mt-3 flex items-end gap-2">

@@ -56,6 +56,7 @@ export const heartbeatStateFields = [
 ] as const;
 
 export interface HeartbeatState extends Record<(typeof heartbeatStateFields)[number], unknown> {
+  autoConsumables?: import('../../consumables.ts').AutoConsumables;
   halloweenAttendance?: Record<string, import('../../events/halloween.ts').HalloweenAttendance>;
   dailyDungeons?: import("../../dungeons/contracts.ts").DungeonState;
   passiveHunting: import('../navigation/passive-settings.ts').PassiveSettings;

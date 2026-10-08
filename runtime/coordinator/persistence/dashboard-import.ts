@@ -89,6 +89,7 @@ export const validators: Record<string, (value: unknown) => boolean> = {
         (p) => object(p) && number(p.min) && number(p.max) && text(p.item),
       ),
   ),
+  autoConsumables: mapOf(text),
   bankSortMode: value => value === "automatic" || value === "request",
   gatheringModes: listOf(text),
   gatheringNoTool: mapOf(boolean),
@@ -111,6 +112,7 @@ const perCharacter = new Set([
   "eventsByCharacter",
   "eventSelectionsByCharacter",
   "restockPolicies",
+  "autoConsumables",
   "autoDeconstruction",
 ]);
 

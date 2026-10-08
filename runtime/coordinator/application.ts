@@ -168,6 +168,7 @@ export function startCoordinatorApplication(
           router.get('/party-api/metrics', unavailable); router.post('/party-api/metrics', unavailable);
           router.post('/party-api/metrics/reset', unavailable);
           router.get('/party-api/metrics/kills', unavailable);
+          router.get('/party-api/metrics/bars', unavailable);
         } };
       }
     })();

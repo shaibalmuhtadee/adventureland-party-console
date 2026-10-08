@@ -517,8 +517,8 @@
     return value && (value.phase === "attending" || value.phase === "preparing") && value.source === source && value.realm === reunionRealm() &&
       value.validUntil > Date.now() + coordinatorClockOffset ? value : null;
   }
-  function halloweenMerchantSafe(target) {
-    if (character.ctype !== "merchant") return true;
+  function halloweenOtherTarget(target) {
+    if (target) return !!target.target && target.target !== character.name;
     var commitment = halloweenCommitment();
     if (!commitment || Date.now() - eventFeedAt > 120000) return false;
     if (commitment.phase === "preparing") return true;
@@ -531,12 +531,31 @@
     var holder = visible ? visible.target : observed && observed.target;
     return !!holder && holder !== character.name;
   }
+  function halloweenMerchantSafe(target) {
+    return character.ctype !== "merchant" || halloweenOtherTarget(target);
+  }
+  function loneHalloweenRogue() {
+    if (character.ctype !== "rogue") return false;
+    var party = typeof get_party === "function" && get_party() || {};
+    return !currentPartyList().some(function(name) {
+      if (name === character.name) return false;
+      var member = get_player(name) || party[name] || partyPositions.find(function(p) { return p.name === name; });
+      return !member || (member.ctype || member.type) !== "merchant";
+    });
+  }
+  function halloweenRogueReady() {
+    return !loneHalloweenRogue() || halloweenOtherTarget();
+  }
+  function halloweenBossAttackAllowed(target) {
+    return !target || ["mrpumpkin", "mrgreen"].indexOf(target.mtype) < 0 ||
+      !loneHalloweenRogue() || halloweenOtherTarget(target);
+  }
   function halloweenTargetAllowed(target) {
     var commitment = halloweenCommitment();
     return !!commitment && commitment.phase === "attending" && !!target && target.type === "monster" && halloweenTargetTypes(commitment).indexOf(target.mtype) >= 0 &&
       target.visible !== false && !target.dead && target.hp > 0 && (!target.map || target.map === character.map) &&
       (target.mtype !== "jr" || character.map === commitment.encounter.map) &&
-      (target.in == null || target.in === character.in) && halloweenMerchantSafe(target);
+      (target.in == null || target.in === character.in) && halloweenMerchantSafe(target) && halloweenBossAttackAllowed(target);
   }
   function halloweenTargetTypes(commitment) {
     if (!commitment || commitment.phase !== "attending") return [];
@@ -587,6 +606,7 @@
   root.__partyEventTimer = null;
   var partyPositions = [];
   var itemSwapSettings = [];
+  var autoConsumable = null;
   var bankStackHomes = {};
   var reunion = root.__partyReunion || null, reunionWorking = false;
   var reunionMageOffer = null;
@@ -3210,7 +3230,8 @@
   function rareControlCurrent() {
     return !!(rareControlState && Date.now() - rareControlAt < 3500 && !navigationIntent.cancelled &&
       rareControlState.revision === navigationIntent.revision && !character.rip &&
-      !partyTownActive && !eventTraveling && !joinedEvent && !escapeOwns());
+      !partyTownActive && !eventTraveling && !joinedEvent && !activeCombatEvent() &&
+      !(G.maps && G.maps[character.map] && G.maps[character.map].event) && !escapeOwns());
   }
   function rareActive() {
     if (typeof unfinishedFight === "function" && unfinishedFight() &&
@@ -5089,7 +5110,7 @@
   }
 
   function cleanoutProtected(item) {
-    return itemSwapReserved(item) || item.l || item.b || ["tracker", "supercomputer", "hpot0", "mpot0", "hpot1", "mpot1"].indexOf(item.name) >= 0;
+    return item.name === autoConsumable || itemSwapReserved(item) || item.l || item.b || ["tracker", "supercomputer", "hpot0", "mpot0", "hpot1", "mpot1"].indexOf(item.name) >= 0;
   }
 
   function itemSwapReserved(item) {
@@ -10357,6 +10378,7 @@
       var state = await request("/status", { method: "POST", body: statusBody });
       if (!runtimeCurrent()) return;
       root.__partyConsoleMaintenance = state.consoleMaintenance || null;
+      autoConsumable = state.autoConsumable || null;
       if (root.__partyConsoleMaintenance) {
         if (!consoleMaintenanceBusy() && typeof stop === 'function') await stop('smart');
         return;
@@ -12308,6 +12330,10 @@
       }
       if (eventTraveling || banking || stocking || upgrading || departurePending || bankQueued) return;
       if (!await eventTravelAllowed(event.name)) return;
+      if (event.name === "halloween" && !halloweenRogueReady()) {
+        root.__partyNavigationDetail = "Waiting for another character to tank the Halloween boss";
+        return;
+      }
       var visibleEventTarget = nearestEventTarget();
       if (event.name === "halloween" && event.preparing && character.map === event.state.map &&
           Math.hypot(character.x - event.state.x, character.y - event.state.y) <= 55) {
@@ -12330,7 +12356,7 @@
         return runtimeCurrent() && !character.rip && !escapeOwns() && !navigationIntent.cancelled &&
           travelNavigationRevision === navigationIntent.revision && eventSelected(event.name) &&
           travelSelectionRevision === eventSelectionRevision && live && live.name === event.name &&
-          (event.name !== "halloween" || live.generation === travelEventGeneration);
+          (event.name !== "halloween" || live.generation === travelEventGeneration && halloweenRogueReady());
       }
       try {
         var destination = eventDestination(event.name, event.state);
@@ -12648,10 +12674,12 @@
     var event = activeCombatEvent();
     if (!event && requiredEventName) return { status: "cancelled" };
     if (!event) return { status: "not-applicable" };
+    if (event.name === "halloween" && !halloweenRogueReady())
+      return {status: "retryable", reason: "Waiting for another character to tank the Halloween boss"};
     var revision = Number(navigationIntent.revision), selection = eventSelectionRevision;
     function current() { var live = activeCombatEvent(); return runtimeCurrent() && !character.rip && !escapeOwns() && !navigationIntent.cancelled &&
       Number(navigationIntent.revision) === revision && eventSelectionRevision === selection && eventSelected(event.name) &&
-      live && live.name === event.name && (event.name !== "halloween" || live.generation === event.generation); }
+      live && live.name === event.name && (event.name !== "halloween" || live.generation === event.generation && halloweenRogueReady()); }
     if (!await eventTravelAllowed(event.name)) return { status: current() ? "retryable" : "cancelled", reason: "Waiting for event travel permission" };
     if (eventTraveling) return { status: "retryable", reason: "Event travel already in progress" };
     eventTargetTypes = event.types; eventMissingSince = 0;
@@ -13341,6 +13369,7 @@
       Math.hypot(character.x-anchor.x,character.y-anchor.y) <= groupedCombat.range;
   }
   function groupedAttackAllowed(target) {
+    if (!halloweenBossAttackAllowed(target)) return false;
     if (rogueKnifeFarm() && target && monsterFocus.indexOf(target.mtype) >= 0 && isAllowedTarget(target) &&
         (!target.target || target.target === character.name)) return true;
     if (dungeonOwned()) return !!(character.cave && !character.cave.paused && dungeonTargetAllowed(target) && groupedFresh() &&
@@ -13572,6 +13601,10 @@
   }
 
   function isAllowedTarget(target, huntTravelCommand, diagnostic) {
+    if (!halloweenBossAttackAllowed(target)) {
+      if (diagnostic) diagnostic.reason = "Lone rogue requires another Halloween boss target";
+      return false;
+    }
     if (character.cave || typeof root !== "undefined" && root.__partyDungeonRuntime && root.__partyDungeonRuntime.owns()) return dungeonTargetAllowed(target);
     if(typeof returnCombatActive==='function' && returnCombatActive())return returnAttacker(target);
     function reject(reason) { if (diagnostic) diagnostic.reason = reason; return false; }
@@ -16302,6 +16335,7 @@
         observedAt: parent.socket && parent.socket.connected ? Date.now() : 0 };
     },
     skillTargetAllowed: function(target) {
+      if (!halloweenBossAttackAllowed(target)) return false;
       if(typeof returnCombatActive==='function' && returnCombatActive())return returnAttacker(target);
       if (!target || target.type !== "monster" || !isAllowedTarget(target) || root.sharedRoutine.isOccupied() || isLiveAbtesting()) return false;
       if(dungeonOwned()) return dungeonTargetAllowed(target);
@@ -16586,6 +16620,11 @@
       return target && target.visible && !target.dead ? target : null;
     },
     itemSwapSettings: function () { return itemSwapSettings; },
+    autoConsumable: function () {
+      return runtimeCurrent() && !root.__partyConsoleMaintenance &&
+        (!parent.socket || parent.socket.connected !== false) &&
+        Date.now() - (root.__partyStatusSuccessAt || 0) < 10000 ? autoConsumable : null;
+    },
     itemSwapMutationBlocked: function () {
       return !!(root.__partyInventoryCommands && !departurePending || root.__partyTracktrixMove || banking ||
         bankQueued || stocking || upgrading || gatheringActive || root.__merchantActiveJob);

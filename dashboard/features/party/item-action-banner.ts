@@ -1,7 +1,8 @@
 export type ItemActionBanner = { label: string; colors: string; border: string; title?: string };
-type Action = 'conflict' | 'upgrade' | 'compound' | 'npc' | 'stand' | 'exchange' | 'deconstruction' | 'delivery' | 'bank' | 'merchant' | 'weapon' | 'stat';
+type Action = 'conflict' | 'upgrade' | 'compound' | 'npc' | 'stand' | 'exchange' | 'deconstruction' | 'delivery' | 'bank' | 'merchant' | 'weapon' | 'stat' | 'consumable';
 export type BannerCandidate = { action: Action; label: string; automatic?: boolean; title?: string };
 const palette: Record<Action, [string, string]> = {
+  consumable: ['bg-teal-950 text-teal-100', 'border-teal-400'],
   conflict: ['bg-red-950 text-red-100', 'border-red-400'],
   upgrade: ['bg-violet-950 text-violet-200', 'border-violet-400'],
   compound: ['bg-fuchsia-950 text-fuchsia-200', 'border-fuchsia-400'],

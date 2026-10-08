@@ -7,9 +7,11 @@ import type { MetricsResponse, MetricResetKind, MetricResets } from '../../../ru
 import { read, useDomain, useVisible } from './query-cache';
 import { MetricsChart } from './metrics-chart';
 import { MetricsSelect, metricsControl, metricsIconControl, metricsMenu } from './metrics-controls';
-import { applyAcknowledgedResets, applyTemporaryResets, currentRate, metricGraphs, withMovingAverage, selectMetricRows, type TemporaryMetricReset, type GraphPoint, type GraphSeries } from './metrics-series';
+import { applyAcknowledgedResets, applyTemporaryResets, pingGraph, selectMetricRows, type TemporaryMetricReset, type GraphPoint, type GraphSeries } from './metrics-series';
 import { MetricsDropEstimator } from './metrics-drop-estimator';
 import { MetricsKills } from './metrics-kills';
+import { MetricsMeasurements } from './metrics-measurements';
+import { MetricsGold } from './metrics-gold';
 import { useMetricsReset } from './metrics-reset';
 
 const ranges = [{ value: 900_000, label: '15 minutes' }, { value: 3_600_000, label: '1 hour' }, { value: 21_600_000, label: '6 hours' }, { value: 86_400_000, label: '24 hours' }, { value: 604_800_000, label: '7 days' }];
@@ -18,17 +20,14 @@ function localDate(at: number) {
   return date.toISOString().slice(0, 16);
 }
 function MetricsView({ active }: { active: boolean }) {
-  const client = useQueryClient(), visible = useVisible(), catalog = useDomain('catalog', active);
+  const client = useQueryClient(), visible = useVisible(), catalog = useDomain('catalog', active), core = useDomain('core', active);
   const resetMutation = useMetricsReset();
   const [estimateVersion, setEstimateVersion] = useState(0);
   const [acknowledgedResets, setAcknowledgedResets] = useState<MetricResets>({});
   const [temporaryResets, setTemporaryResets] = useState<Partial<Record<MetricResetKind, TemporaryMetricReset>>>({});
   const [duration, setDuration] = useState(3_600_000), [live, setLive] = useState(true), [clock, setClock] = useState(Date.now);
   const [customFrom, setCustomFrom] = useState(() => localDate(Date.now() - 3_600_000)), [customTo, setCustomTo] = useState(() => localDate(Date.now()));
-  const [characters, setCharacters] = useState<string[]>([]), [server, setServer] = useState(''), [compare, setCompare] = useState(false);
-  const [damageMonster, setDamageMonster] = useState(''), [skill, setSkill] = useState(''), [item, setItem] = useState('');
-  const [lootMode, setLootMode] = useState<'total' | 'interval'>('total'), [goldMode, setGoldMode] = useState<'balance' | 'change'>('balance');
-  const [damageWindow, setDamageWindow] = useState(60_000);
+  const [characters, setCharacters] = useState<string[]>([]), [server, setServer] = useState('');
   const [killFiltersVersion, setKillFiltersVersion] = useState(0);
   useEffect(() => {
     if (!active || !live || !visible || duration === 0) return;
@@ -46,21 +45,17 @@ function MetricsView({ active }: { active: boolean }) {
   });
   const rawData = query.data;
   const data = useMemo(() => rawData ? applyTemporaryResets(applyAcknowledgedResets(rawData, acknowledgedResets), temporaryResets) : undefined, [rawData, acknowledgedResets, temporaryResets]);
-  const filters = useMemo(() => ({ characters, server, monster: '', skill: '', item: '', loot: lootMode, gold: goldMode, compare, smoothingMs: 10_000 }), [characters, server, lootMode, goldMode, compare]);
-  const graphs = useMemo(() => data ? metricGraphs(data, filters) : null, [data, filters]);
-  const damageGraph = useMemo(() => data ? metricGraphs(data, { ...filters, monster: damageMonster, skill, smoothingMs: damageWindow }) : null, [data, filters, damageMonster, skill, damageWindow]);
-  const damageAverageMs = Math.max(damageWindow, data?.resolutionMs || 10_000);
-  const damageWithAverage = useMemo(() => damageGraph ? withMovingAverage(damageGraph.damage, damageGraph.damageAverage, damageGraph.series, damageAverageMs) : null, [damageGraph, damageAverageMs]);
-  const loot = useMemo(() => data ? metricGraphs(data, { ...filters, item }).loot : [], [data, filters, item]);
+  const pingCharacters = useMemo(() => [...new Set((core.data?.activeSlots || [])
+    .filter(slot => slot.state === 'online' && slot.character)
+    .flatMap(slot => slot.character ? [slot.character] : []))]
+    .filter(name => !characters.length || characters.includes(name)), [core.data?.activeSlots, characters]);
+  const graphs = useMemo(() => data ? pingGraph(data, { characters: pingCharacters, server }) : null, [data, pingCharacters, server]);
   const rows = useMemo(() => data ? selectMetricRows(data.points.flatMap(point => point.values), characters, server) : [], [data, characters, server]);
-  const monsters = [...new Set([...rows.flatMap(row => [...row.damage.map(hit => hit.monster), ...row.credits.map(credit => credit.monster)]), ...(data?.points.flatMap(point => point.kills).filter(kill => !server || kill.server === server).map(kill => kill.monster) || [])])].sort();
-  const skills = [...new Set(rows.flatMap(row => row.damage.map(hit => hit.skill)))].sort();
-  const acquiredItems = [...new Set(rows.flatMap(row => row.loot.map(item => item.item)))].sort();
   const itemNames = new Map(catalog.data?.merchantCatalog?.allItems?.map(item => [item.id, item.name]));
   const monsterNames = new Map(catalog.data?.bestiaryCatalog?.map(monster => [monster.id, monster.name]));
+  const skillNames = new Map(catalog.data?.skillCatalog?.flatMap(group => group.skills.map(skill => [skill.id, skill.name] as const)));
   const select = (label: string, value: string, change: (value: string) => void, options: { value: string; label: string }[], width?: string) =>
     <MetricsSelect label={label} value={value} onChange={change} options={options} className={width} />;
-  const monsterOptions = [{ value: '', label: 'All monsters' }, ...monsters.map(id => ({ value: id, label: monsterNames.get(id) || id }))];
   const breakdown = (kind: 'loot' | 'damage'): { data: GraphPoint[]; series: GraphSeries[]; labels: string[] } => {
     const totals = new Map<string, number>();
     for (const row of rows) {
@@ -72,9 +67,6 @@ function MetricsView({ active }: { active: boolean }) {
       series: [{ key: 'total', label: kind === 'loot' ? 'Quantity' : 'Damage', color: kind === 'loot' ? '#fbbf24' : '#a78bfa' }] };
   };
   const lootBars = breakdown('loot'), damageBars = breakdown('damage');
-  const averageOptions = [...new Set([10_000, 30_000, 60_000, 300_000, 900_000, 3_600_000, data?.resolutionMs || 10_000])].sort((a, b) => a - b).filter(ms => ms >= (data?.resolutionMs || 10_000)).map(ms => ({
-    value: String(ms), label: 'MA ' + (ms >= 3_600_000 ? ms / 3_600_000 + 'h' : ms >= 60_000 ? ms / 60_000 + 'm' : ms / 1000 + 's'),
-  }));
   function clearView(kinds: MetricResetKind[]) {
     if (!rawData) return;
     const latest = rawData.points[rawData.points.length - 1];
@@ -94,8 +86,8 @@ function MetricsView({ active }: { active: boolean }) {
     resetTitle: kind === 'kills' || kind === 'damage' ? 'Permanently delete all stored ' + kind + ' data' : 'Clear graph; keep stored history',
   });
   function reset() {
-    setCharacters([]); setServer(''); setCompare(false); setKillFiltersVersion(value => value + 1); setDamageMonster(''); setSkill(''); setItem('');
-    setLootMode('total'); setGoldMode('balance'); setDamageWindow(60_000); setTemporaryResets({});
+    setCharacters([]); setServer(''); setKillFiltersVersion(value => value + 1);
+    setTemporaryResets({});
     setDuration(3_600_000); setLive(true); setClock(Date.now());
   }
   return <section className="mx-auto max-w-[1760px] px-4 py-7 md:px-6 md:py-8" aria-label="Game metrics">
@@ -116,7 +108,6 @@ function MetricsView({ active }: { active: boolean }) {
           </PopoverContent>
         </Popover>
         {select('Server', server, setServer, [{ value: '', label: 'All servers' }, ...(data?.servers || []).map(server => ({ value: server, label: server }))])}
-        {select('Series', compare ? 'characters' : 'total', value => setCompare(value === 'characters'), [{ value: 'total', label: 'Party total' }, { value: 'characters', label: 'By character' }])}
         <div className="mx-1 h-5 w-px bg-[#30433f]" />
         <button className={metricsControl} aria-pressed={live && duration !== 0} disabled={duration === 0} onClick={() => setLive(!live)}>{live ? <Pause size={18} /> : <Play size={18} />}{live ? 'Live' : 'Paused'}</button>
         <button className={metricsIconControl} onClick={reset} aria-label="Reset metrics filters and restore temporarily hidden history" title="Reset filters / restore history"><RotateCcw size={18} /></button>
@@ -131,19 +122,17 @@ function MetricsView({ active }: { active: boolean }) {
       <MetricsKills key={killFiltersVersion} active={active} live={live && duration !== 0} from={from} to={to} clock={clock}
         characters={characters} server={server} catalog={catalog.data?.bestiaryCatalog} resetAt={Math.max(acknowledgedResets.kills || 0, data.resets?.kills || 0)}
         {...resetControls('kills')} />
-      <MetricsChart {...resetControls('damage')} title="DPS" data={damageWithAverage?.data || []} series={damageWithAverage?.series || []}
-        currentValue={live && duration ? { amount: !query.isError && damageGraph ? currentRate(damageGraph.damage, damageGraph.series, data) : null, unit: 'damage/s' } : undefined} yLabel="Damage / sec" logarithmic
-        controls={<>{select('Monster', damageMonster, setDamageMonster, monsterOptions, 'w-28')}{select('Skill', skill, setSkill, [{ value: '', label: 'All skills' }, ...skills.map(skill => ({ value: skill, label: skill }))], 'w-28')}
-          {select('Moving-average window', String(damageAverageMs), value => setDamageWindow(Number(value)), averageOptions, 'w-28')}</>} />
-      <MetricsChart {...resetControls('gold')} title="Gold history" data={graphs.gold} series={graphs.series} yLabel={goldMode === 'balance' ? 'Gold' : 'Gold change'} logarithmic={goldMode === 'balance'}
-        controls={select('Gold display', goldMode, value => setGoldMode(value === 'change' ? 'change' : 'balance'), [{ value: 'balance', label: 'Balance' }, { value: 'change', label: 'Net change' }])} />
-      <MetricsChart {...resetControls('loot')} title="Items acquired" data={loot} series={graphs.series} yLabel={lootMode === 'total' ? 'Quantity' : 'Quantity / interval'} type={lootMode === 'interval' ? 'bar' : 'line'} logarithmic={lootMode === 'total'}
-        controls={<>{select('Item', item, setItem, [{ value: '', label: 'All items' }, ...acquiredItems.map(id => ({ value: id, label: itemNames.get(id) || id }))])}
-          {select('Quantity display', lootMode, value => setLootMode(value === 'interval' ? 'interval' : 'total'), [{ value: 'total', label: 'Cumulative' }, { value: 'interval', label: 'Per interval' }])}</>} />
+      <MetricsMeasurements key={'damage:' + killFiltersVersion} metric="damage" active={active} live={live && duration !== 0} from={from} to={to} clock={clock}
+        characters={characters} server={server} names={itemNames} monsterNames={monsterNames} skillNames={skillNames}
+        resetAt={Math.max(acknowledgedResets.damage || 0, data.resets?.damage || 0)} {...resetControls('damage')} />
+      <MetricsGold key={'gold:' + killFiltersVersion} data={data} characters={characters} server={server} {...resetControls('gold')} />
+      <MetricsMeasurements key={'loot:' + killFiltersVersion} metric="loot" active={active} live={live && duration !== 0} from={from} to={to} clock={clock}
+        characters={characters} server={server} names={itemNames} monsterNames={monsterNames} skillNames={skillNames}
+        resetAt={rawData?.resets?.loot || 0} temporaryReset={temporaryResets.loot} {...resetControls('loot')} />
       <MetricsDropEstimator key={estimateVersion} data={data} catalog={catalog.data?.merchantCatalog} characters={characters} server={server} live={live && duration !== 0} />
-      <MetricsChart {...resetControls('loot')} title="Loot breakdown" data={lootBars.data} series={lootBars.series} yLabel="Quantity" xLabel="Item" xFormat={value => lootBars.labels[Math.round(value)] || ''} type="bar" categoryAxis />
-      <MetricsChart {...resetControls('damage')} title="Damage breakdown" data={damageBars.data} series={damageBars.series} yLabel="Damage" xLabel="Character" xFormat={value => damageBars.labels[Math.round(value)] || ''} type="bar" categoryAxis />
-      <MetricsChart {...resetControls('ping')} title="Ping history" data={graphs.ping} series={compare ? graphs.series : graphs.series.map(line => ({ ...line, label: 'Average ping' }))} yLabel="Ping (ms)" />
+      <MetricsChart {...resetControls('loot')} title="Loot breakdown" data={lootBars.data} series={lootBars.series} yLabel="Quantity" xFormat={value => lootBars.labels[Math.round(value)] || ''} type="bar" categoryAxis />
+      <MetricsChart {...resetControls('damage')} title="Damage breakdown" data={damageBars.data} series={damageBars.series} yLabel="Damage" xFormat={value => damageBars.labels[Math.round(value)] || ''} type="bar" categoryAxis />
+      <MetricsChart {...resetControls('ping')} title="Ping history" data={graphs.ping} series={graphs.series} yLabel="Ping (ms)" empty={pingCharacters.length ? 'No recorded ping' : 'No logged-in characters'} />
     </div>}
   </section>;
 }
