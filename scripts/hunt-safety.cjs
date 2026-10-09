@@ -39,6 +39,10 @@ function arrivalProtected(hunt, leader, status, intent, destination, now) {
   }
   return true;
 }
+function deathLoopDeath(s, newReport) {
+  // The final death can arrive after the strategy releases ownership at zero XP.
+  return !!s.deathLoop || !!(newReport && s.lastDeath?.strategy === 'death-loop');
+}
 function eventDeath(s, trips, deathAt, newReport) {
   const reported = newReport && s.lastDeath?.eventTrip;
   const known = reported && trips.find(t => t.startedAt === reported.startedAt && t.event === reported.event);
@@ -60,7 +64,7 @@ function recordDeaths(hunt, statuses, now) {
     if ((!previous.dead && dead) || (!previous.dead && newReport)) {
       const deathAt = newReport ? at : now;
       const trips = hunt.eventTrips?.[name] || [];
-      if (!eventDeath(s, trips, deathAt, newReport)) {
+      if (!deathLoopDeath(s, newReport) && !eventDeath(s, trips, deathAt, newReport)) {
         delete hunt.arrivalHandoff;
         hunt.deathCount++; deaths.push(name);
       }
@@ -80,4 +84,4 @@ function partyFighting(hunt, statuses, now) {
         now - Number(s.combat.lastAttackAt || 0) < 3000)) || (s.threats || []).some(t => t.hp > 0));
   });
 }
-module.exports = { missionDestination, recordDeaths, eventDeath, partyFighting, acceptArrival, arrivalProtected };
+module.exports = { missionDestination, recordDeaths, deathLoopDeath, eventDeath, partyFighting, acceptArrival, arrivalProtected };

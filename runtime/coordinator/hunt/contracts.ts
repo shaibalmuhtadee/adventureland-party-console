@@ -93,7 +93,8 @@ export interface HuntStatus {
   ctype?: string;
   server?: string;
   hp?: number;
-  lastDeath?: { at?: number; eventTrip?: import("../events/hunt-trip.ts").HuntEventTrip | null };
+  deathLoop?: boolean;
+  lastDeath?: { at?: number; strategy?: 'death-loop' | null; eventTrip?: import("../events/hunt-trip.ts").HuntEventTrip | null };
   map: string;
   x: number;
   y: number;

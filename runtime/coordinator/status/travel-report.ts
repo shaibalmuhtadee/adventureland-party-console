@@ -2,7 +2,7 @@ import { requestObject } from '../http/contracts.ts';
 
 // These fields describe one game sample, not independently mergeable domains.
 export const travelReportFields = ['monsterHunt', 'map', 'in', 'server', 'x', 'y', 'hp', 'max_hp', 'rip',
-  'lastDeath', 'moving', 'transporting', 'speed', 'convoyNavigation', 'convoyProtocol',
+  'lastDeath', 'deathLoop', 'moving', 'transporting', 'speed', 'convoyNavigation', 'convoyProtocol',
   'movementGeometry', 'movement', 'combatSelection', 'groupedCombat', 'travelSample'] as const;
 
 export function sequencedTravelReport(body: unknown): boolean {

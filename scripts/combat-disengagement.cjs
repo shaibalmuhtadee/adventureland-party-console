@@ -28,7 +28,8 @@ module.exports = function createCombatDisengagement(party, hooks) {
       const prior=party.combatDeathSeen[name], stamp=Number(s.lastDeath?.at)||0;
       const started=party.groupedCombat?.target?.startedAt ?? Infinity;
       const reported = stamp > (prior?.at || 0);
-      if(!huntSafety.eventDeath(s,party.huntEventTrips?.[name]||[],reported ? stamp : now(),reported) &&
+      if(!huntSafety.deathLoopDeath(s,reported) &&
+          !huntSafety.eventDeath(s,party.huntEventTrips?.[name]||[],reported ? stamp : now(),reported) &&
           (!prior ? dead(s)||stamp>started : !prior.dead&&(dead(s)||stamp>prior.at)))deaths.push(name);
       party.combatDeathSeen[name]={at:Math.max(prior?.at||0,stamp),dead:dead(s)};
     }

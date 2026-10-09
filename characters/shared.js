@@ -656,6 +656,7 @@
     var trip = huntEventTrip && !huntEventTrip.endedAt ? huntEventTrip :
       !huntEventTrip && joinedEvent ? {event: joinedEvent, startedAt: at} : null;
     return { at: at, message: death.message, details: death.details,
+      strategy: deathLoopActive() ? 'death-loop' : null,
       eventTrip: trip ? Object.assign({}, trip) : null };
   }
   var pendingKillCredits = [];
@@ -2796,6 +2797,7 @@
       y: Math.round(character.y),
       moving: !!character.moving,
       rip: !!character.rip,
+      deathLoop: deathLoopActive(),
       lastDeath: lastDeathInfo,
       farmingNavigationDebug: { location: partyLocation, cancelled: navigationIntent.cancelled,
         occupied: root.sharedRoutine && root.sharedRoutine.isOccupied(),
@@ -2910,7 +2912,7 @@
       connected: !!(parent.socket && parent.socket.connected), transport:root.__partyTravelTransport || null};
     Object.assign(body, {map:character.map, in:character.in, x:character.x, y:character.y,
       moving:!!character.moving, transporting:!!parent.transporting, speed:character.speed,
-      hp:character.hp, max_hp:character.max_hp, rip:!!character.rip,
+      hp:character.hp, max_hp:character.max_hp, rip:!!character.rip, deathLoop:deathLoopActive(),
       convoyProtocol:4, convoyNavigation:convoyNavigationReport(), movementGeometry:movement.identity,
       movement:movement.report() || movement.last()});
     group.currentAttackers = currentTravelAttackers();
@@ -12497,12 +12499,12 @@
       !is_on_cooldown(skill) && can_use(skill);
   }
   function beginFarmReunion(command) {
-    if (deathLoopActive()) return;
-    if (dungeonOwned()) return;
-    if (eventExitOwnsMovement()) return;
-    if (character.ctype === "merchant") return;
+    if (deathLoopActive()) return false;
+    if (dungeonOwned()) return false;
+    if (eventExitOwnsMovement()) return false;
+    if (character.ctype === "merchant") return false;
     if (typeof lastDeathInfo !== "undefined" && lastDeathInfo) root.__partyRecoveredDeathAt = parent.__partyRecoveredDeathAt = lastDeathInfo.at;
-    if (combatRecoveryActive()) return;
+    if (combatRecoveryActive()) return false;
     if (farmingTravelToken) farmingTravelToken.cancelled = true;
     reunion = root.__partyReunion = { id: character.name + "-" + Date.now(),
       revision: navigationIntent.revision, phase: "waiting", retryAt: 0,
@@ -12511,6 +12513,7 @@
     followingLeader = false;
     kiteState.targetId = null;
     Promise.resolve(stop("smart")).catch(function () {});
+    return true;
   }
   function reunionCurrent(token) {
     return runtimeCurrent() && reunion === token && !token.cancelled &&
@@ -16729,7 +16732,8 @@
       if (root.partyRoleRunner) root.partyRoleRunner.resetTargeting();
       var result = await rejoinActiveEventAfterRespawn();
       if (result.status === 'retryable') throw new Error(result.reason || 'Saved event recovery pending');
-      if (result.status === 'not-applicable') beginFarmReunion();
+      if (result.status === 'not-applicable' && !beginFarmReunion())
+        throw new Error('Saved farming recovery pending');
     },
     autoConsumable: function () {
       return runtimeCurrent() && !root.__partyConsoleMaintenance &&

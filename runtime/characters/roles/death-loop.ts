@@ -30,6 +30,7 @@ export function installDeathLoop(root: CombatRoot) {
     entered = false;
     host.__partyDeathLoopRunning = false;
     returning = true;
+    stage('death-loop-returning');
     await shared.deathLoopLeave?.();
     returning = false;
     stage('death-loop-complete');
