@@ -69,7 +69,7 @@ export function MetricsChart(props: Props) {
       </MetricsMenu>
     </div>
     <div className="min-h-0 min-w-0 flex-1 overflow-x-auto">
-    <div className="h-full" style={props.barCategories ? { minWidth: Math.max(300, props.barCategories.length * 132 + 100) } : undefined}>
+    <div className="h-full" style={props.barCategories ? { minWidth: Math.max(300, props.barCategories.length * 132 + 100) } : props.categoryAxis ? { minHeight: Math.max(300, props.data.length * 32 + 40) } : undefined}>
       {!numbers.length ? <div className="grid h-full place-items-center text-base text-[#789087]">{props.resetting ? 'Resetting…' : props.empty || (active.length ? 'No data' : 'Select a series')}</div> : <ResponsiveContainer width="100%" height="100%" minWidth={0}>
         <ComposedChart data={plotted} layout={props.categoryAxis ? 'vertical' : 'horizontal'} margin={{ top: props.barCategories ? 34 : 10, right: 14, bottom: 6, left: 12 }} accessibilityLayer>
           <CartesianGrid stroke="#23392e" horizontal={!props.categoryAxis} vertical={!!props.categoryAxis} />

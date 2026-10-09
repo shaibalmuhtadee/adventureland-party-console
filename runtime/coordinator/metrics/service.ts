@@ -1,8 +1,10 @@
 import { CoordinatorJsonlStore } from '../persistence/jsonl-store.ts';
 import { requestObject, type HttpRouter } from '../http/contracts.ts';
-import { METRIC_BUCKET_MS, METRIC_RESET_KINDS, type MetricsBarsResponse, type MetricBarSummary, type MetricsKillsResponse, type MonsterKillSummary, type MetricResetKind, type MetricResets, type MetricDeathTotal, type MetricFrame, type MetricPoint, type MetricTotals, type MetricsResponse } from '../../metrics/contracts.ts';
+import { METRIC_BUCKET_MS, METRIC_RESET_KINDS, type MetricsKillsResponse, type MonsterKillSummary, type MetricResetKind, type MetricResets, type MetricDeathTotal, type MetricFrame, type MetricPoint, type MetricTotals, type MetricsResponse } from '../../metrics/contracts.ts';
 import { createMeasurementIndex } from './measurement-index.ts';
 import { measurementSummary } from './measurement-summary.ts';
+import { goldHistory } from './gold-history.ts';
+import type { AccountGoldPoint } from '../../metrics/contracts.ts';
 import { metricNumber, metricText, parseMetricFrame, parseMetricSample } from '../../metrics/parse.ts';
 
 const DAY = 86_400_000;
@@ -12,7 +14,7 @@ interface StoredBucket extends MetricPoint {
   events: { id: string; at: number }[];
   sources: string[];
 }
-interface Ports { owned(name: string): boolean; now(): number; warn(error: unknown): void }
+interface Ports { owned(name: string): boolean; now(): number; warn(error: unknown): void; accountGold?(): number | null }
 const bucketKey = (width: number, at: number) => `${width}:${at}`;
 function copy<T>(value: T): T { return structuredClone(value); }
 function resetKind(value: unknown): value is MetricResetKind {
@@ -111,6 +113,7 @@ function storedBucket(value: unknown): StoredBucket {
 export function createMetricsService(path: string, ports: Ports) {
   const store = new CoordinatorJsonlStore(path, path + '.compact', 1_800_000);
   const buckets = new Map<string, StoredBucket>();
+  const accountGold = new Map<number, AccountGoldPoint>();
   const measurements = createMeasurementIndex();
   const killTotals = new Map<string, MetricDeathTotal>();
   function indexDeaths(deaths: MetricDeathTotal[], direction: 1 | -1 = 1) {
@@ -132,6 +135,11 @@ export function createMetricsService(path: string, ports: Ports) {
   try {
     if (savedStart === undefined) store.set('startedAt', startedAt);
     for (const [key, value] of store.entries()) if (key.startsWith('bucket:')) buckets.set(key.slice(7), storedBucket(value));
+    for (const [key, value] of store.entries()) if (key.startsWith('accountGold:')) {
+      const point = requestObject(value);
+      if (!metricNumber(point.at) || (point.total !== null && !metricNumber(point.total))) throw Error('Invalid account gold history');
+      accountGold.set(point.at, { at: point.at, total: point.total });
+    }
   } catch (error) { store.close(); throw error; }
   let lastReceivedAt: number | null = null;
   let unavailable = false;
@@ -198,6 +206,16 @@ export function createMetricsService(path: string, ports: Ports) {
   function retain() {
     if (resetting) return;
     const now = ports.now();
+    for (const at of accountGold.keys()) if (at < now - 180 * DAY) { accountGold.delete(at); store.delete('accountGold:' + at); }
+    const retainedGold = new Map<string, AccountGoldPoint>();
+    for (const point of accountGold.values()) {
+      const age = now - point.at, width = age > 30 * DAY ? 900_000 : age > DAY ? 60_000 : METRIC_BUCKET_MS;
+      const key = width + ':' + Math.floor(point.at / width);
+      const previous = retainedGold.get(key);
+      if (!previous || point.at > previous.at) retainedGold.set(key, point);
+    }
+    const retainedTimes = new Set([...retainedGold.values()].map(point => point.at));
+    for (const at of accountGold.keys()) if (!retainedTimes.has(at)) { accountGold.delete(at); store.delete('accountGold:' + at); }
     for (const resolution of [METRIC_BUCKET_MS, 60_000, 900_000])
     for (const [key, source] of [...buckets].filter(([, bucket]) => bucket.width === resolution).sort((a, b) => a[1].at - b[1].at)) {
       const age = now - (source.at + source.width);
@@ -222,6 +240,17 @@ export function createMetricsService(path: string, ports: Ports) {
   for (const bucket of buckets.values()) { indexDeaths(bucket.kills); measurements.add(bucket.values); }
   const timer = setInterval(() => { if (unavailable) return; try { retain(); } catch (error) { storageFailed(error); } }, 300_000);
   timer.unref();
+  // Collection belongs to the coordinator, so closing the dashboard cannot stop it.
+  const goldTimer = setInterval(() => {
+    if (unavailable || resetting || !ports.accountGold) return;
+    try {
+      const at = Math.floor(ports.now() / METRIC_BUCKET_MS) * METRIC_BUCKET_MS;
+      if (accountGold.has(at)) return;
+      const point = { at, total: ports.accountGold() };
+      store.set('accountGold:' + at, point); accountGold.set(at, point);
+    } catch (error) { storageFailed(error); }
+  }, 1000);
+  goldTimer.unref();
   async function erase(kinds: MetricResetKind[]) {
     let count = 0;
     for (const [key, current] of buckets) {
@@ -314,6 +343,19 @@ export function createMetricsService(path: string, ports: Ports) {
       monsters: [...monsters.values()].sort((a, b) => b.count - a.count || a.monster.localeCompare(b.monster)), lastReceivedAt };
   }
   function install(router: HttpRouter) {
+    router.get('/party-api/metrics/account-gold', (request, response) => {
+      if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
+      const now = ports.now(), input = request.query || {}, resetAt = Number(input.resetAt ?? 0), to = Number(input.to ?? now);
+      if (!metricNumber(resetAt) || !metricNumber(to) || to > now + 60_000) return response.status(400).json({ error: 'Invalid gold range' });
+      const from = Math.max(resetAt, accountGold.keys().next().value ?? now, now - 180 * DAY);
+      const width = Math.max(METRIC_BUCKET_MS, Math.ceil((to - from) / (600 * METRIC_BUCKET_MS)) * METRIC_BUCKET_MS);
+      const points = new Map<number, AccountGoldPoint>();
+      for (const point of accountGold.values()) if (point.at >= from && point.at <= to) {
+        const at = Math.floor(point.at / width) * width, previous = points.get(at);
+        if (!previous || point.at > previous.at) points.set(at, point);
+      }
+      return response.json({ from, to, points: [...points.values()].sort((a, b) => a.at - b.at) });
+    });
     router.get('/party-api/metrics/bars', (request, response) => {
       if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
       if (resetting) return response.status(503).json({ error: 'Metrics reset in progress' });
@@ -367,12 +409,20 @@ export function createMetricsService(path: string, ports: Ports) {
       lastReceivedAt = now;
       return response.json({ ok: true, expired });
     });
-    router.get('/party-api/metrics', (request, response) => {
+    router.get('/party-api/metrics', async (request, response) => {
       if (unavailable) return response.status(503).json({ error: 'Metrics storage unavailable' });
       if (resetting) return response.status(503).json({ error: 'Metrics reset in progress' });
-      const now = ports.now(), input = request.query || {}, from = Number(input.from ?? now - 3_600_000), to = Number(input.to ?? now);
+      const now = ports.now(), input = request.query || {}, to = Number(input.to ?? now);
+      const resetAt = Number(input.resetAt ?? 0);
+      if (input.sinceReset === 'gold' && !metricNumber(resetAt)) return response.status(400).json({ error: 'Invalid gold reset' });
+      const from = input.sinceReset === 'gold' ? Math.max(startedAt, resets.gold || 0, resetAt, now - 180 * DAY) : Number(input.from ?? now - 3_600_000);
       if (!metricNumber(from) || !metricNumber(to) || from >= to || to - from > 180 * DAY || to > now + 60_000)
         return response.status(400).json({ error: 'Choose a valid metrics range of at most 180 days' });
+      if (input.sinceReset === 'gold') {
+        const cuts = copy(resets);
+        const history = await goldHistory(matchingBuckets(from, to), from, to);
+        return response.json({ ...history, startedAt, characters: [...allCharacters].sort(), resets: cuts });
+      }
       const names = typeof input.characters === 'string' ? input.characters.split(',').slice(0, 32) : [];
       const servers = typeof input.servers === 'string' ? input.servers.split(',').slice(0, 32) : [];
       return response.json(query(from, to, names, servers));
@@ -398,5 +448,5 @@ export function createMetricsService(path: string, ports: Ports) {
       } finally { resetting = false; }
     });
   }
-  return { install, close() { clearInterval(timer); store.close(); } };
+  return { install, close() { clearInterval(timer); clearInterval(goldTimer); store.close(); } };
 }

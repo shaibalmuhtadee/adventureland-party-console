@@ -1,4 +1,5 @@
 import { offeringStock } from '../inventory/offering-stock.ts';
+import { accountGoldSnapshot } from './account-gold.ts';
 import { characterConnections } from '../../roster/connection-status.ts';
 import { gameLogs } from "./game-logs.ts";
 import { requestText, type HttpRequest, type HttpResponse } from "../http/contracts.ts";
@@ -265,6 +266,7 @@ export function createPublicStateRoute(state: Readonly<PublicState>, ports: Publ
               serverNow: ports.now(),
               accountId: accountId(state),
               bankGold: requestObject(state.bankSnapshot).gold ?? null,
+              accountGold: accountGoldSnapshot(state.bankSnapshot, ports.slots(), ports.bankbois(), state.statuses),
               characterDetails: diagnosticCharacters(dashboardCharacters(state, ports)),
               characters: Object.fromEntries(
                 Object.entries(dashboardCharacters(state, ports)).map(([name, status]) => [

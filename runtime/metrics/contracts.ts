@@ -55,6 +55,13 @@ export interface MetricsResponse {
   incomplete: boolean;
   resets?: MetricResets;
 }
+export interface AccountGoldPoint { at: number; total: number | null }
+export interface AccountGoldResponse { from: number; to: number; points: AccountGoldPoint[] }
+export type GoldSample = Pick<MetricSample, 'at' | 'gold' | 'goldMovement'>;
+export interface GoldHistoryResponse {
+  startedAt: number; from: number; to: number; resolutionMs: number; characters: string[]; resets?: MetricResets;
+  points: { at: number; values: (Pick<MetricTotals, 'character' | 'server' | 'goldStart'> & { first: GoldSample; last: GoldSample })[] }[];
+}
 export interface MonsterKillSummary {
   monster: string;
   count: number;

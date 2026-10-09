@@ -37,12 +37,21 @@ E2E testing, builds, and process restarts remain with the user unless requested.
   Collection and banking therefore preserve net profit, including when viewing
   only the fighter. Spending, sales, donations, mail and external transfers still
   affect profit. It is not classified farming income.
-  Each character starts at its first observed balance in the selected range.
+  Each character starts at its first observed balance since the last graph reset.
+  Gold has its own range, independent of the shared time filter, up to the
+  180-day retention limit. Its reset time is saved per account in this browser.
   Disconnected characters retain their last known gain; joining characters do
   not add their existing wealth as income. The offset survives CODE reloads,
   disconnects, collector retries and coordinator restarts. Older history lacks
   transfer evidence and cannot be corrected retrospectively. Bank balances and
   transaction categories are not shown separately.
+- Total account gold records the same bank plus active-slot carried balance as
+  the header every ten seconds in the coordinator, even with the dashboard closed.
+  Bank storage characters are excluded, matching the header. Unknown balances
+  remain gaps. Collection starts when this feature is activated; older account
+  balances cannot be backfilled. History survives coordinator restarts and is
+  retained for 180 days, with older samples downsampled. Its display reset is
+  saved per account in this browser.
 - Items acquired counts quantities in native chest outcomes for each recipient.
   Transfers, purchases, banking, exchange rewards and production are excluded.
   Item level and native property/stat variants are retained independently.
@@ -61,7 +70,12 @@ graph filters. Historical disconnected characters remain available.
 Kills and DPS have separate searchable monster filters. DPS also filters skills
 and groups bars by character or skill. Items acquired has a searchable item filter
 and rate units. Gold shows cumulative net gold gained with a character selector.
-Loot and damage breakdowns show horizontal bars; ping shows a time series.
+Loot breakdown shows all acquired items as horizontal bars, with scrolling when
+needed. It defaults to today in America/Toronto and offers yesterday, a selected
+day or an inclusive date range. Calendar boundaries follow EST/EDT automatically.
+It ignores the shared time range and temporary item resets so selected days keep
+their complete loot totals. Its reset button restores today's date filter.
+There is no Damage breakdown graph. Ping shows a time series.
 Cards use a uniform 460-pixel height in two desktop columns and one mobile column.
 Each card has one header with its title, optional counter and Options button.
 Filters, scales, character-series selection and reset live in that menu.
@@ -102,17 +116,21 @@ offer logarithmic scales and scroll horizontally when needed.
 The active view refreshes once a second, and characters deliver sealed frames
 once a second. History still uses bounded 10-second buckets; the newest bucket
 updates as each frame arrives.
+Gold charts request history every ten seconds. Gold reads include only balance
+endpoints and internal-movement offsets, and yield between historical batches
+so a long range cannot monopolize coordinator processing. The account-total
+counter still follows the header's live core updates.
 
 ## Resets
 
 Each graph has a reset button. Kills and credits are permanently erased together.
-DPS and Damage breakdown permanently erase the shared damage history. Their
+DPS permanently erases damage history. These
 durable cutoffs prevent older queued frames from restoring deleted data.
 The append journal is compacted after deletion, and interrupted erasure resumes
 from its persisted checkpoint. Ingestion waits in the character outbox during
 the erasure so new observations cannot race with cleanup.
 
-Gold, Items acquired, Loot breakdown, and Ping resets temporarily clear the
+Gold, Total account gold, Items acquired, and Ping resets temporarily clear the
 display. Stored measurements remain available through Reset filters. The last
 received partial bucket is subtracted so old quantities do not immediately
 reappear. Reset data permanently clears kills/damage and temporarily clears

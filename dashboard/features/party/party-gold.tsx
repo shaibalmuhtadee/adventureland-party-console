@@ -47,7 +47,7 @@ export function PartyGold({ state }: { state: PartyState }) {
       select: selectGold,
     })),
   });
-  const { carried, total } = goldTotals(
+  const { carried, total } = state.accountGold ?? goldTotals(
     state.bankGold,
     balances.map((query) => query.data),
   );

@@ -18,6 +18,7 @@ import { initializeStandLocation, standLocationRoute } from './merchant/stand-lo
 import { createRareRouteDistance } from './navigation/rare-route-distance.ts';
 import { createPontyShopping } from './merchant/ponty-shopping.ts';
 import { createMetricsService } from './metrics/service.ts';
+import { accountGoldSnapshot } from './telemetry/account-gold.ts';
 import { characterHomeWorld } from './characters/home-world.ts';
 import { realmSwitchInProgress } from './characters/realm-switch.ts';
 export function startCoordinatorApplication(
@@ -160,6 +161,7 @@ export function startCoordinatorApplication(
       try {
         return createMetricsService(LOCALSTORAGE_PATH + '.metrics.jsonl', {
           owned: name => !!ownedCharacter(name), now: Date.now,
+          accountGold: () => accountGoldSnapshot(party.bankSnapshot, slotPayload(), Object.values(party.bankbois), party.statuses).total,
           warn: error => log.warn({ error }, 'Metrics retention failed'),
         });
       } catch (error) {
@@ -172,6 +174,7 @@ export function startCoordinatorApplication(
           router.post('/party-api/metrics/reset', unavailable);
           router.get('/party-api/metrics/kills', unavailable);
           router.get('/party-api/metrics/bars', unavailable);
+          router.get('/party-api/metrics/account-gold', unavailable);
         } };
       }
     })();

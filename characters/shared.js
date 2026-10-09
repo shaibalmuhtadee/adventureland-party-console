@@ -13822,12 +13822,13 @@
 
   function departureTargetEngaged(target) {
     if(!target || !target.visible || target.dead || target.hp === 0 || root.partyRoleRunner && root.partyRoleRunner.isKnownDead(target.id))return false;
+    // Check ownership before scanning retained deaths for neutral farm monsters.
+    var defense=typeof huntTravelDefense==='function' && huntTravelDefense() && (convoyTraveling.defenseTargets||[]).some(function(t){return passingKey(t)===passingKey(target);});
+    if(!defense && !isAttackingPartyMember(target))return false;
     var deaths = typeof groupedCombat !== 'undefined' && groupedCombat && groupedCombat.deaths || [];
     if(deaths.some(function(d){return String(d.id)===String(target.id) && d.map===character.map &&
       String(d.in==null?d.map:d.in)===String(character.in==null?character.map:character.in) && d.server===reunionRealm();}))return false;
-    if(typeof huntTravelDefense==='function' && huntTravelDefense() && (convoyTraveling.defenseTargets||[]).some(function(t){return passingKey(t)===passingKey(target);}))return true;
-    if(isAttackingPartyMember(target))return true;
-    return false;
+    return true;
   }
   function departureCombatPending() {
     return Object.values(parent.entities||{}).some(function(e){return e && e.type==='monster' && departureTargetEngaged(e);});
