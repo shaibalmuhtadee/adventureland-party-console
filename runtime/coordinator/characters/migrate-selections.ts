@@ -2,15 +2,12 @@ interface SelectionState {
   merchantCharacter: string | null;
   eventSelectionsByCharacter: Record<string, unknown>;
   eventsByCharacter: Record<string, unknown>;
-  headlessSlots: (string | null)[];
-  bankbois: Record<string, unknown>;
-  activeRealm: string;
 }
 
 /** Explicit event selections, including empty arrays, override legacy enable flags. */
 export function migrateCharacterSelections(
   state: SelectionState,
-  workers: Record<string, { realm?: string } | undefined>,
+  workers: Record<string, unknown>,
   supportedEvents: readonly string[],
 ): void {
   for (const name of new Set(
@@ -22,10 +19,5 @@ export function migrateCharacterSelections(
         ? supportedEvents.filter((id) => id !== "anniversary")
         : [];
     state.eventSelectionsByCharacter[name] = ["anniversary", ...otherEvents];
-  }
-  for (const name of state.headlessSlots) {
-    if (!name || state.bankbois[name]) continue;
-    const worker = workers[name];
-    if (worker) worker.realm = state.activeRealm;
   }
 }
