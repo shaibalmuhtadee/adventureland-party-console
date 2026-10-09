@@ -1011,18 +1011,22 @@ export function startCoordinatorApplication(
       persist: persistBankState,
     });
     const inventoryReservations = coordinatorPolicies.createInventoryReservations(party);
+    function activityOwnsInventory(name: string): boolean {
+      const activity = activityPlan?.control(name);
+      return !!activity && activity.phase !== 'solo';
+    }
     function inventoryCleanoutPlan(name: string) {
       return coordinatorPolicies.inventoryCleanoutPlan(party, name, {
         now: Date.now,
         destination: name => farmingNavigation.waypoint(name),
-        blocked: name => !!(activityPlan?.owns(name) && activityPlan.merchantReserved()) || !!consoleUpdate.current() || dungeonOwns(party, name) ||
+        blocked: name => activityOwnsInventory(name) || !!consoleUpdate.current() || dungeonOwns(party, name) ||
           rareControl.owns() || party.merchantCurrent?.target === name &&
             activeNames().includes(String(party.merchantCharacter)) ||
           !!farmingScopes.effective(name).activeConvoy?.participants.includes(name),
       });
     }
     const bankQueueService = coordinatorPolicies.createBankQueue(party, {
-      allowed: name => !(activityPlan?.owns(name) && activityPlan.merchantReserved()),
+      allowed: name => !activityOwnsInventory(name),
       now: () => Date.now(),
       nextCommand: () => party.nextCommandId++,
       cleanout: inventoryCleanoutPlan,
