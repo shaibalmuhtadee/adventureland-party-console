@@ -14,6 +14,7 @@ import {
 } from "./response-types.ts";
 
 const retainedCommands = new Set([
+  'activity-plan',
   "bank",
   "bankboi-service",
   "upgrade",

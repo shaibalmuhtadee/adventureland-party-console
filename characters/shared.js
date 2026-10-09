@@ -22,7 +22,8 @@
     context: function() { return { runtime: convoyRuntimeId || String(runtimeGeneration), revision: Number(navigationIntent && navigationIntent.revision) || 0,
       current: runtimeCurrent() && (!parent.socket || parent.socket.connected !== false), paused: !!root.__partyMovementPaused || !!(dungeonClient && !dungeonClient.canMove()) }; },
     request: request,
-    townReady: function() { return !departureCombatPending() && eligibleDepartureChests().length === 0; },
+    townReady: function() { return !departureCombatPending() &&
+      (inventoryCleanoutOwner && inventoryCleanoutOwner.id === lastCommand || eligibleDepartureChests().length === 0); },
     transitionReady: function() { return eligibleDepartureChests().length === 0; },
     metrics: function(event) { queueCombatEvent('navigation', 'Movement '+(event.phase || (event.done?'completed':'stopped'))+' · '+(event.engine || 'ALClient comparison'), event, 'movement-metrics:'+event.id+':'+(event.phase || 'done')); },
     diagnostic: function(event, message) {
@@ -341,6 +342,7 @@
   root.__partyPassiveRegenTimer = null;
   var coordinatorClockOffset = 0;
   var banking = false;
+  var inventoryCleanoutOwner = null;
   var bankQueued = false;
   var stocking = false;
   var upgrading = false;
@@ -525,7 +527,8 @@
   }
   function halloweenCommitment() {
     var value = halloweenAttendance;
-    var source = character.ctype !== "merchant" && followLeader && leader ? leader : character.name;
+    var source = root.__partyActivityPlan ? root.__partyActivityPlan.farmer :
+      character.ctype !== "merchant" && followLeader && leader ? leader : character.name;
     return value && (value.phase === "attending" || value.phase === "preparing") && value.source === source && value.realm === reunionRealm() &&
       value.validUntil > Date.now() + coordinatorClockOffset ? value : null;
   }
@@ -559,6 +562,8 @@
     return !loneHalloweenRogue() || halloweenOtherTarget();
   }
   function halloweenBossAttackAllowed(target) {
+    if (target && root.__partyActivityPlan && !root.__partyActivityPlan.fightersReady &&
+        ['mrpumpkin','mrgreen','jr'].indexOf(target.mtype)>=0) return false;
     return !target || ["mrpumpkin", "mrgreen"].indexOf(target.mtype) < 0 ||
       !loneHalloweenRogue() || halloweenOtherTarget(target);
   }
@@ -2760,6 +2765,8 @@
       activeEvent: liveEventName,
       serverLiveEvents: serverLiveEvents,
       halloweenObservation: halloweenObservation(),
+      activityEligibleChests: eligibleDepartureChests().length,
+      activityDepartureCombatPending: departureCombatPending(),
       halloweenDeparturePending: joinedEvent === "halloween" &&
         (departureCombatPending() || eligibleDepartureChests().length > 0),
       goobrawlCombat: hasGoobrawlCombat(),
@@ -2814,6 +2821,7 @@
         town: partyTownActive || townTraveling, anniversary: anniversaryBusy || anniversaryStaging,
         event: eventTraveling, forceTravel: forceTraveling, stocking: stocking, upgrading: upgrading },
       banking: banking,
+      inventoryCleanoutRetry: Date.now() < (root.__partyInventoryCleanoutRetryAt || 0),
       bankQueued: bankQueued,
       stocking: stocking,
       upgrading: upgrading,
@@ -3430,6 +3438,7 @@
   }
 
   async function stockUp() {
+    if (root.__partyActivityPlan && ['looting','town','collecting','returning'].indexOf(root.__partyActivityPlan.phase)>=0) return false;
     var potionName = "hpot1";
     var targetQuantity = 20;
     var currentQuantity = quantity(potionName);
@@ -4099,15 +4108,61 @@
     }
   }
 
-  async function goBank(marked, withdrawals, goldTarget, returnLocation) {
+  async function goBank(marked, withdrawals, goldTarget, returnLocation, cleanout) {
     if (banking) return;
     while (stocking) await new Promise(function (resolve) { setTimeout(resolve, 250); });
     banking = true;
     var origin = { map: character.map, x: character.x, y: character.y };
+    var sold = [];
+    var cleanoutRevision = navigationIntent.revision;
+    function cleanoutCurrent() {
+      return !cleanout || runtimeCurrent() && lastCommand === cleanout.id &&
+        navigationIntent.revision === cleanoutRevision && !character.rip && !deathLoopActive();
+    }
     try {
-      await smart_move("bank");
+      if (cleanout) {
+        if (character.ctype === 'merchant' || !combatStrategyEnabled('inventory-cleanout') || freeInventorySlots() > 0) return;
+        inventoryCleanoutOwner = cleanout;
+        cancelGroupRoute(); cancelFightRoute(); cancelRarePath();
+        cancelFarmApproach('inventory cleanout owns movement');
+        followingLeader = false;
+        resetCombatMovement();
+        await stop();
+        if ((cleanout.npcSales || []).length) {
+          // A full bag cannot drain item chests before leaving for cleanout.
+          await smart_move('fancypots', undefined, { skipLootWait: true });
+          for (var saleIndex = 0; saleIndex < cleanout.npcSales.length; saleIndex += 1) {
+            if (!cleanoutCurrent() || !combatStrategyEnabled('inventory-cleanout')) break;
+            var saleMark = cleanout.npcSales[saleIndex];
+            var saleSlot = Number.isInteger(saleMark.slot) && sameItem(character.items[saleMark.slot], saleMark.item)
+              ? saleMark.slot : findItem(saleMark.item);
+            var saleItem = character.items[saleSlot];
+            if (!saleItem || cleanoutProtected(saleItem)) continue;
+            var saleQuantity = Math.min(Number(saleMark.quantity) || 1, Number(saleItem.q) || 1);
+            var beforeQuantity = Number(saleItem.q) || 1;
+            await sell(saleSlot, saleQuantity);
+            var saleDeadline = Date.now() + 2500;
+            while (sameItem(character.items[saleSlot], saleMark.item) &&
+                (Number(character.items[saleSlot].q) || 1) > beforeQuantity - saleQuantity && Date.now() < saleDeadline)
+              await sleep(100);
+            if (sameItem(character.items[saleSlot], saleMark.item) &&
+                (Number(character.items[saleSlot].q) || 1) > beforeQuantity - saleQuantity)
+              throw new Error('NPC sale was not confirmed: ' + saleItem.name);
+            if (saleMark.id) sold.push(saleMark.id);
+          }
+        }
+      }
+      if (cleanout && (!cleanoutCurrent() || !combatStrategyEnabled('inventory-cleanout'))) return;
+      if (!cleanout || marked.length) {
+        await smart_move("bank", undefined, cleanout ? { skipLootWait: true } : undefined);
+        await waitForBankPack('items1', 10000);
+      }
       for (var i = 0; i < marked.length; i += 1) {
-        var slot = findItem(marked[i]);
+        if (cleanout && (!cleanoutCurrent() || !combatStrategyEnabled('inventory-cleanout'))) break;
+        var wanted = marked[i].item || marked[i];
+        var slot = Number.isInteger(marked[i].slot) && sameItem(character.items[marked[i].slot], wanted)
+          ? marked[i].slot : findItem(wanted);
+        if (cleanout && slot >= 0 && cleanoutProtected(character.items[slot])) continue;
         if (slot >= 0) await bankStoreFully(slot);
       }
       var withdrawn = [];
@@ -4120,9 +4175,9 @@
         withdrawn.push(withdrawals[w]);
       }
       var targetGold = Number.isInteger(goldTarget) && goldTarget >= 0 ? goldTarget : 0;
-      if (character.gold > targetGold) {
+      if (!cleanout && character.gold > targetGold) {
         await bank_deposit(character.gold - targetGold);
-      } else if (character.gold < targetGold) {
+      } else if (!cleanout && character.gold < targetGold) {
         var desired = targetGold - character.gold;
         var available = character.bank && Number(character.bank.gold) || 0;
         var amount = Math.min(desired, available);
@@ -4131,18 +4186,22 @@
       }
       game_log("Bank run complete", "#51D2E1");
     } catch (error) {
+      if (cleanout && cleanoutCurrent()) root.__partyInventoryCleanoutRetryAt = Date.now() + 30000;
       game_log("Bank run failed: " + (error.reason || error.message || error), "red");
     } finally {
       try {
-        await smart_move(returnLocation || partyLocation || origin);
+        if (cleanoutCurrent())
+          await smart_move(returnLocation || partyLocation || origin, undefined, cleanout ? { skipLootWait: true } : undefined);
       } catch (returnError) {
         game_log("Return from bank failed: " + (returnError.reason || returnError.message || returnError), "red");
       }
       banking = false;
+      if (inventoryCleanoutOwner === cleanout) inventoryCleanoutOwner = null;
       try {
         await request("/bank-complete", {
           method: "POST",
-          body: { character: character.name, withdrawn: withdrawn || [] },
+          body: { character: character.name, withdrawn: withdrawn || [],
+            ...(cleanout ? { commandId: cleanout.id, npcSalesResolved: sold } : {}) },
         });
       } catch (completeError) {
         game_log("Bank queue release failed: " + (completeError.message || completeError), "red");
@@ -5310,7 +5369,7 @@
       var liveSlot = markedSlot !== null && sameItem(character.items[markedSlot], wanted)
         ? markedSlot : findItem(wanted);
       if (liveSlot >= 0 && !requests.some(function (request) { return request.slot === liveSlot; }))
-        requests.push({ item: wanted, slot: liveSlot, mark: mark, kind: "keep", quantity: (mark.deconstructionId || mark.npcSaleId || mark.automaticPickup) ? mark.quantity : undefined });
+        requests.push({ item: wanted, slot: liveSlot, mark: mark, kind: "keep", quantity: (command.activityCollection || mark.deconstructionId || mark.npcSaleId || mark.automaticPickup) ? mark.quantity : undefined });
     });
     // Resolve automatic rules against the character's live bag at rendezvous
     // time. The coordinator snapshot can be one status beat behind when loot
@@ -5380,6 +5439,8 @@
       await waitForCallBudget(handoffDeadline);
       assertMerchantContinuation(command);
       if (!sameItem(character.items[slot], requests[i].item)) continue;
+      if (command.activityCollection && (cleanoutProtected(character.items[slot]) || character.items[slot].name === 'computer' ||
+          (command.protectedSlots || []).indexOf(slot) >= 0 || !compoundAvailableStock(command)[slot])) continue;
       if (itemSwapReserved(character.items[slot]) || isPersonalTracker(character.items[slot]) || command.cleanout && cleanoutProtected(character.items[slot])) continue;
       var sendQuantity = Math.min(Number(requests[i].quantity) || itemQuantity(character.items[slot]),
         itemQuantity(character.items[slot]));
@@ -5387,7 +5448,7 @@
       var clearsSlot = sendQuantity >= itemQuantity(character.items[slot]);
       await send_item(command.merchant, slot, sendQuantity);
       if (clearsSlot) cleanoutFreeSlots += 1;
-      sent.push(requests[i]);
+      sent.push(command.activityCollection ? Object.assign({}, requests[i], {quantity:sendQuantity}) : requests[i]);
       capacity -= 1;
       if (requests[i].kind === "bank") banked.push(requests[i].mark);
       if (requests[i].kind === "keep") kept.push((requests[i].mark.deconstructionId || requests[i].mark.npcSaleId || requests[i].mark.automaticPickup) ? Object.assign({}, requests[i].mark, { quantity: sendQuantity }) : requests[i].mark);
@@ -5410,11 +5471,46 @@
         await send_gold(command.merchant, excess);
       }
     }
+    if (command.activityCollection) {
+      command.activitySent = sent;
+      return;
+    }
     await request("/merchant/handoff-complete", { method: "POST", body: {
       jobId: command.jobId, commandId: command.id, character: character.name, sent: sent, banked: banked, kept: kept, cleaned: cleaned,
       cleanoutRemaining: !!command.cleanout && cleanoutFreeSlots <= 3 && sent.length < requests.length, gold: excess,
     }});
     game_log("Merchant handoff complete", "#51D2E1");
+  }
+
+  async function runActivityCommand(command) {
+    var failure = null;
+    try {
+      if (!root.__partyActivityPlan || root.__partyActivityPlan.id !== command.planId ||
+          root.__partyActivityPlan.generation !== command.encounterGeneration) throw Error('Activity command was superseded');
+      if (command.action === 'collect') {
+        command.activityCollection = true;
+        command.combatHandoff = true;
+        await merchantHandoff(command);
+      } else await afterCombat(async function () {
+        while (runtimeCurrent() && eligibleDepartureChests().length) { await smartLoot(); await sleep(100); }
+        if (!runtimeCurrent() || lastCommand !== command.id) throw Error('Activity travel interrupted');
+        if (reunion) await cancelFarmReunion('activity plan travel');
+        cancelFarmApproach('activity plan travel');
+        if (command.action === 'town') {
+          await smart_move({map:'main',x:0,y:0});
+        } else if ((command.action === 'farm' || command.action === 'event') && command.location) {
+          await smart_move(command.location);
+        } else throw Error('Activity travel destination is missing');
+      }, 'activity plan ' + command.action);
+    } catch (error) { failure = String(error.reason || error.message || error); }
+    var receipt = {planId:command.planId,encounterGeneration:command.encounterGeneration,
+      commandId:command.id,character:character.name,clientInstance:parent.__partyClientInstance || null,
+      success:!failure,error:failure,sent:(command.activitySent || []).map(function(entry) {
+        return {item:entry.item,quantity:entry.quantity};
+      })};
+    root.__partyActivityReceipt = receipt;
+    await request('/activity-plan/receipt', {method:'POST',body:receipt});
+    if (failure) throw Error(failure);
   }
 
   async function merchantOrderHandoff(command) {
@@ -9630,6 +9726,8 @@
     if (escapeOwns() && !(escapeState.stage === "recovery-convoy" && command && command.purpose === "escape-recovery")) {
       reportMerchantCommand(command, "deferred", "escape"); return;
     }
+    if (command && command.type === 'activity-plan' && command.id <= lastCommand)
+      return handleCommand(command);
     if (!command || command.id <= lastCommand) return;
     var ownReunionConvoy=root.__partySharedWalking && root.__partySharedWalking.activity==="farm-recovery" &&
       command.type==="party-monster-travel" && /^shared-walk/.test(command.purpose||"");
@@ -9647,6 +9745,12 @@
   }
 
   async function handleCommand(command) {
+    if (command && command.type === 'activity-plan' && command.id <= lastCommand) {
+      var planReceipt = root.__partyActivityReceipt;
+      if (planReceipt && planReceipt.commandId === command.id && planReceipt.planId === command.planId)
+        await request('/activity-plan/receipt', {method:'POST',body:planReceipt});
+      return;
+    }
     if (root.__partyUpgradePreviewInFlight) return;
     if (root.__partyConsoleMaintenance) return;
     if (!command || command.id <= lastCommand) return;
@@ -9859,6 +9963,7 @@
       command, "stand inventory sync", function () { return merchantStandSync(command); });
     if (command.type === "merchant-idle" && character.ctype === "merchant") return merchantIdle(command);
     if (command.type === "bankboi-service" && character.ctype === "merchant") return runBankboiService(command);
+    if (command.type === 'activity-plan') return runActivityCommand(command);
     if (command.type === "merchant-handoff") return withMerchantHandoffRecovery(command, function () { return merchantHandoff(command); });
     if (command.type === "merchant-order-handoff") return afterCombat(function () {
       return merchantOrderHandoff(command);
@@ -9895,7 +10000,8 @@
       return;
     }
     if (command.type === "bank") return afterCombat(function () {
-      return goBank(command.marked || [], command.withdrawals || [], command.goldTarget, command.returnLocation);
+      return goBank(command.marked || [], command.withdrawals || [], command.goldTarget, command.returnLocation,
+        command.inventoryCleanout ? command : null);
     }, "banking");
     if (command.type === "upgrade") return afterCombat(function () {
       return upgradeMarked(command.items || [], command.compounds || [], command.purchases || [], command.returnLocation);
@@ -10460,6 +10566,7 @@
           !root.__merchantInventoryTidy && !merchantLuckyUpgrade().pending())
         await nativeStandSync(null, false);
       statusPhase = "apply status";
+      root.__partyActivityPlan = state.activityPlanControl || null;
       if (dashboardSampler) dashboardSampler.renew(state.dashboardLease);
       root.__partyStatusSuccessAt = Date.now();
       root.__merchantRealmErrors = root.__merchantRealmErrors || {};
@@ -10762,7 +10869,8 @@
   }
 
   function merchantEventWorkReserved() {
-    return character.ctype === "merchant" && (!!joinedEvent || eventTraveling || eventReturnPending ||
+    return character.ctype === "merchant" && (root.__partyActivityPlan &&
+      (root.__partyActivityPlan.phase !== 'solo' || root.__partyActivityPlan.mode === 'paused') || !!joinedEvent || eventTraveling || eventReturnPending ||
       !!root.__merchantCoordinatorEventRecovery || eventsEnabled && !navigationIntent.cancelled && !!activeCombatEvent());
   }
 
@@ -16175,6 +16283,7 @@
     returnAttacker: returnAttacker,
     returnMovementTick: cancelReturnTownUnderAttack,
     isOccupied: function () {
+      if (root.__partyActivityPlan && root.__partyActivityPlan.hold && !departureCombatPending()) return true;
       if (deathLoopActive()) { root.__partyCombatOwner = 'death-loop'; return true; }
       if (character.cave || root.__partyDungeonRuntime && root.__partyDungeonRuntime.owns())
         return !runtimeCurrent() || !!root.__partyConsoleMaintenance || !!character.cave?.paused;
@@ -16708,6 +16817,7 @@
     itemSwapSettings: function () { return itemSwapSettings; },
     combatStrategySettings: function () { return combatStrategySettings; },
     deathLoopActive: deathLoopActive,
+    activityReserved: function () { return !!root.__partyActivityPlan && root.__partyActivityPlan.phase !== 'solo'; },
     deathLoopMove: function(destination) {
       return smart_move(destination, undefined, { owner: { deathLoop: true }, skipLootWait: true });
     },

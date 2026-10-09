@@ -13,6 +13,7 @@ export function installDeathLoop(root: CombatRoot) {
       strategyEnabled(shared.combatStrategySettings?.(), 'death-loop');
   }
   function active(): boolean {
+    if (!entered && shared.activityReserved?.()) return false;
     if (!enabled()) {
       if (!stopped && !entered) host.__partyDeathLoopRunning = false;
       return entered;

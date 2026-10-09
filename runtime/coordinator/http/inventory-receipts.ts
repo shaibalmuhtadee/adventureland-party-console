@@ -3,12 +3,18 @@ import type { DeliveryRequest } from '../merchant/delivery-recovery.ts';
 import { requestObject, requestText, type HttpRequest, type HttpResponse } from "./contracts.ts";
 import { receiveBankDeconstruction } from "../merchant/bank-deconstruction.ts";
 import { receiveBankUpgrades } from '../inventory/bank-upgrade-receipts.ts';
+import { releasePlayerSale } from '../merchant/player-npc-sales.ts';
+import type { NpcSale } from '../merchant/npc-sales.ts';
+import type { CleanoutSale } from '../inventory/inventory-cleanout.ts';
+import type { ItemMark } from '../contracts/item.ts';
 
 interface ReceiptState {
   merchantDeliveries?: Record<string, DeliveryRequest[] | undefined>;
   merchantCharacter?: string | null;
   deconstructionMarks?: import("../merchant/deconstruction.ts").DeconstructionMark[];
-  commands: Record<string, { id?: unknown; type: string } | undefined>;
+  commands: Record<string, { id?: unknown; type: string; inventoryCleanout?: boolean; npcSales?: CleanoutSale[] } | undefined>;
+  npcSaleMarks?: NpcSale[];
+  merchantMarked?: Record<string, ItemMark[] | undefined>;
   statScrolls: Record<string, unknown[] | undefined>;
   withdrawals: Record<string, unknown[] | undefined>;
   upgrades: Record<string, unknown[] | undefined>;
@@ -114,6 +120,18 @@ export function createInventoryReceiptRoutes(state: ReceiptState, ports: Receipt
       return res.status(409).json({ error: "character does not own the bank slot" });
     const name = state.bankCurrent.name,
       withdrawn = list(body.withdrawn);
+    const command = state.commands[name];
+    if (command?.inventoryCleanout) {
+      if (body.commandId !== command.id) return res.status(409).json({ error: 'inventory cleanout command is no longer current' });
+      const resolved = new Set(list(body.npcSalesResolved).filter(id =>
+        command.npcSales?.some(mark => mark.id === id)));
+      state.npcSaleMarks = (state.npcSaleMarks || []).filter(mark => {
+        if (mark.source !== 'character' || mark.character !== name || !resolved.has(mark.id)) return true;
+        releasePlayerSale(state, mark);
+        return false;
+      });
+      ports.persist();
+    }
     receiveBankDeconstruction({ ...state, merchantCharacter: state.merchantCharacter || null }, name, withdrawn, Date.now());
     receiveBankUpgrades(state, name, withdrawn);
     if (state.deconstructionMarks?.length) ports.persist();

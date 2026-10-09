@@ -26,6 +26,7 @@ interface WalkPorts {
   cancel(): void;
 }
 interface WalkState extends SharedState {
+  activityPlan?: import('../../activity-plan.ts').ActivityPlan | null;
   halloweenAttendance?: Record<string, HalloweenAttendance>;
   followers?: Record<string, boolean>;
   phoenixPatrolActive?: boolean;
@@ -90,6 +91,13 @@ export function createSharedWalks(input: unknown, ports: WalkPorts) {
         commitment.generation !== r.halloweenGeneration || distance(commitment.encounter, r.destination) > 1) return false;
     if (commitment.phase === 'attending') return commitment.lastLiveAt >= ports.now() - 10000;
     const reporter = state.statuses[source];
+    const plan = state.activityPlan;
+    if (plan?.run && plan.config.farmer === source && plan.run.phase === 'preparing') {
+      const announced = reporter?.halloweenObservation?.upcoming?.find(spawn => sameHalloweenSpawn(spawn, commitment.encounter));
+      return !!announced && Number(reporter?.seenAt) >= ports.now()-10000 &&
+        ports.now()-Number(reporter?.halloweenObservation?.feedAt) <= 120000 &&
+        announced.spawnAt-ports.now() <= plan.config.preparationSeconds*1000 && ports.now() <= announced.spawnAt+30000;
+    }
     const upcoming = halloweenPreparation(reporter?.halloweenObservation, ports.now());
     return !!upcoming && Number(reporter?.seenAt) >= ports.now() - 10000 && sameHalloweenSpawn(upcoming, commitment.encounter);
   }

@@ -124,6 +124,7 @@ export * from "./http/character-command.ts";
 export * from "./http/dashboard-import.ts";
 export * from "./merchant/luck-scheduler.ts";
 export * from "./inventory/bank-queue.ts";
+export * from "./inventory/inventory-cleanout.ts";
 export * from "./merchant/automatic-sales.ts";
 export * from "./inventory/reservations.ts";
 export * from "./inventory/reserved-cargo.ts";

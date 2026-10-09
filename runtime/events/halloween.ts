@@ -72,7 +72,7 @@ export function readHalloweenEncounter(value: unknown): HalloweenEncounter | nul
   if (!point || !health) return null;
   return { type: entry.type, ...point, ...health, target: typeof entry.target === 'string' ? entry.target : null };
 }
-function readHalloweenSpawn(value: unknown): HalloweenSpawn | null {
+export function readHalloweenSpawn(value: unknown): HalloweenSpawn | null {
   const entry = object(value), point = entry && readPoint(entry);
   return entry && point && isHalloweenBoss(entry.type) && finite(entry.spawnAt) && entry.spawnAt > 0
     ? {...point, type: entry.type, spawnAt: entry.spawnAt} : null;

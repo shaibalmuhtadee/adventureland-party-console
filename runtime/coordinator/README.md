@@ -9,7 +9,24 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+The party-level [Solo Farming + Events plan](../../docs/solo-farming-events.md)
+owns the online roster and a durable Halloween encounter through mandatory town
+collection and return. Saved farming, Follow, event and home preferences remain
+separate from its effective settings. Publish character, coordinator and dashboard
+assets through the full supported restart. See the linked manual workflow.
+
 Character cards expose a collapsed Strategies section below Farming settings.
+Inventory cleanout defaults off and is available to every non-merchant class.
+When the usable inventory has no empty slots, it queues a serialized town trip
+to sell NPC-tagged stock and store bank-tagged stock, then returns to the saved
+farming waypoint. It uses shared automatic rules and one-off marks, protects
+locked/bound items, potions, tracking devices, automatic elixirs and swap gear,
+and leaves carried gold unchanged. It works while the merchant is logged out.
+Events, dungeons and existing movement/work owners defer the trip. Sale receipts
+clear only confirmed marks from the matching command. Publish character,
+coordinator and dashboard assets through the full supported restart. Manually
+verify the full-bag trigger, item selection, sell/bank operations, return to
+farming, disabled behavior and non-merchant visibility.
 Death loop defaults off and is available to every combat class, excluding
 merchants. When enabled, it takes control at 95% XP, travels to the arena,
 provokes monsters without healing or kiting, and respawns until XP is zero.

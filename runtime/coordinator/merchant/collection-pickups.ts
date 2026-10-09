@@ -6,6 +6,7 @@ import { markedItem, sameMarkedItem } from '../inventory/item-identity.ts';
 import { availableCraftStock, craftProtection, type CraftReservationState } from './craft-reservations.ts';
 
 export interface PickupState extends ConflictState, CraftReservationState {
+  autoConsumables?: Record<string, string | undefined>;
   itemSwaps?: ItemSwaps;
   statuses?: Record<string, {items?: (InventoryEntry | null)[]; itemSwap?: { reserved?: import('../../item-swaps.ts').SwapItem[] }} | undefined>;
   merchantAutomations?: Record<string, boolean | undefined>;
@@ -76,4 +77,16 @@ export function collectionPickups(state: PickupState, name: string, reason = 'ma
     if (!occupied.some(value => value.slot === pickup.slot && sameMarkedItem(markedItem(value), pickup.item))) keep.push(pickup);
   }
   return {bank, keep};
+}
+
+/** Mandatory event pickup bypasses pressure/marks, retaining the same protected and reserved stock. */
+export function mandatoryCollectionPickups(state: PickupState, name: string): ItemMark[] {
+  const stock = availableCraftStock((state.statuses?.[name]?.items || []).map(entry => entry &&
+    {...entry, craftLocation: 'inventory:' + name}), craftProtection(state));
+  return stock.flatMap(entry => {
+    if (protectedEntry(state, name, entry) || !entry?.item ||
+        entry.item.name === state.autoConsumables?.[name] ||
+        ['computer', 'hpot0', 'hpot1', 'mpot0', 'mpot1'].includes(String(entry.item.name))) return [];
+    return [{slot: entry.slot, item: entry.item, quantity: Number(entry.item.q) || 1}];
+  });
 }

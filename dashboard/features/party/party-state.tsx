@@ -41,6 +41,7 @@ import { UpgradeMark } from "./upgrade-mark";
 import { Withdrawal } from "./withdrawal";
 
 export type PartyState = {
+  activityPlan?: import('../../../runtime/activity-plan').ActivityPlan | null;
   combatStrategies?: import('../../../runtime/combat/strategies').CharacterStrategies;
   autoConsumables?: import('../../../runtime/consumables').AutoConsumables;
   itemSwaps?: import('../../../runtime/item-swaps').ItemSwaps;

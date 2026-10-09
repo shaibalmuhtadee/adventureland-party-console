@@ -18,6 +18,7 @@ interface Configuration {
 type ManagerInput = Pick<
   CharacterManagerPorts,
   | "blocks"
+  | "allowed"
   | "clock"
   | "log"
   | "local"
@@ -59,6 +60,7 @@ export function coordinatorCodeDigest(
 /** Compose worker management and CODE reload services without capturing account snapshots. */
 export function createCoordinatorCharacterServices(input: CharacterServicesInput) {
   const manager = createCharacterManager({
+    allowed: input.allowed,
     blocks: input.blocks,
     clock: input.clock,
     log: input.log,

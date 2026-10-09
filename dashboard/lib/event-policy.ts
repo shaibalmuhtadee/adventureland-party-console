@@ -1,4 +1,5 @@
 interface EventFormation {
+  activityPlan?: import('../../runtime/activity-plan.ts').ActivityPlan | null;
   leader?: string | null;
   merchantCharacter?: string | null;
   merchantEventCombatEnabled?: boolean;
@@ -14,6 +15,9 @@ function merchantCombatEnabled(party: EventFormation, name: string): boolean {
 }
 
 export function selectedEvents(party: EventFormation, name: string): string[] {
+  const plan = party.activityPlan;
+  if (plan?.run && [plan.config.farmer, plan.config.merchant, ...plan.config.companions].includes(name))
+    return ['preparing', 'participating'].includes(plan.run.phase) ? ['halloween'] : [];
   const source = eventPolicy(party, name).source;
   const saved = party.eventSelectionsByCharacter?.[source];
   const selections = saved ?? ["anniversary", ...(party.eventsByCharacter?.[source] ? supportedEvents.filter(id => id !== "anniversary") : [])];
@@ -26,6 +30,10 @@ export function eventEnabled(party: EventFormation, name: string, event: string)
 }
 
 export function eventPolicy(party: EventFormation, name: string) {
+  const plan = party.activityPlan;
+  if (plan?.run && [plan.config.farmer, plan.config.merchant, ...plan.config.companions].includes(name))
+    return {inherited: name !== plan.config.farmer, source: plan.config.farmer,
+      enabled: merchantCombatEnabled(party, name) && ['preparing', 'participating'].includes(plan.run.phase)};
   const inherited = Boolean(
     party.leader &&
     name !== party.leader &&

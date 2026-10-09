@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { RadioGroup } from "@/components/ui/radio-group";
 import { MapPin } from "lucide-react";
 import { DungeonPanel } from './dungeon-panel';
+import { ActivityPlanCard } from './activity-plan-card';
 import { EscapeControl } from "./escape-control";
 import { ConnectedFarmingAreaPicker as FarmingAreaPicker } from "./connected-farming-area-picker";
 import { MonsterFocusPicker } from "./monster-focus-picker";
@@ -30,6 +31,7 @@ export function PartyWorkspace({ model }: { model: PartyConsoleModel }) {
     <>
       <section className="px-5 py-7 md:px-10">
         <div className="mx-auto max-w-[1500px]">
+        <ActivityPlanCard model={model} />
         <DungeonPanel model={model} />
         {!chars.length && !pending.length && <div className="mb-5 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><RosterControls
           slots={state.activeSlots || []}

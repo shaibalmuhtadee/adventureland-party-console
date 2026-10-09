@@ -23,6 +23,7 @@ import type { loadCoordinatorBankVaults } from "./infrastructure/game-data.ts";
 import type { ResourceBlock } from "./merchant/queue.ts";
 import { validItemSwapMap, type ItemSwaps } from '../item-swaps.ts';
 import { restoreCharacterStrategies } from '../combat/strategies.ts';
+import { restoreActivityPlan } from '../activity-plan.ts';
 
 type Settings = Record<string, unknown> &
   SavedServiceSettings &
@@ -74,6 +75,7 @@ export function createInitialCoordinatorState<Merchant extends string | null = s
     configuredRealm,
   } = input;
   return {
+    activityPlan: restoreActivityPlan(persistedSettings.activityPlan),
     gameVersion: 0,
     dailyDungeons: persistedSettings.dailyDungeons as import("../dungeons/contracts.ts").DungeonState | undefined,
     ...sharedSettings(persistedSettings),

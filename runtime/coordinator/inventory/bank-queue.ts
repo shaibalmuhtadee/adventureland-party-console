@@ -1,3 +1,5 @@
+import type { InventoryCleanoutPlan } from './inventory-cleanout.ts';
+
 interface Job {
   name: string;
   type: string;
@@ -16,11 +18,26 @@ interface State {
   goldTargets: Record<string, unknown>;
 }
 /** Serializes legacy character bank visits and snapshots their command payload at dispatch. */
-export function createBankQueue(state: State, ports: { now(): number; nextCommand(): number }) {
+export function createBankQueue(state: State, ports: {
+  now(): number;
+  nextCommand(): number;
+  cleanout?(name: string): InventoryCleanoutPlan | null;
+  allowed?(name: string): boolean;
+}) {
   function dispatch(): void {
     if (state.bankCurrent || !state.bankQueue.length) return;
+    if (ports.allowed?.(state.bankQueue[0]!.name) === false) return;
     const job = state.bankQueue.shift()!,
       name = job.name;
+    if (job.type === 'inventory-cleanout') {
+      const plan = ports.cleanout?.(name);
+      if (!plan) { dispatch(); return; }
+      state.bankCurrent = job;
+      state.bankStartedAt = ports.now();
+      state.commands[name] = { id: ports.nextCommand(), type: 'bank', inventoryCleanout: true,
+        ...plan, withdrawals: [] };
+      return;
+    }
     state.bankCurrent = job;
     state.bankStartedAt = ports.now();
     state.commands[name] =

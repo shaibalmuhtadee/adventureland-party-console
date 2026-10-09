@@ -11,6 +11,7 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
+  activityReserved?(): boolean;
   deathLoopActive?(): boolean;
   deathLoopEnter?(): Promise<void>;
   deathLoopLeave?(): Promise<void>;

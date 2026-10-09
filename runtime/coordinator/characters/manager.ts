@@ -23,6 +23,7 @@ interface Character {
 }
 
 export interface CharacterManagerPorts {
+  allowed?(name: string): boolean;
   blocks: Record<string, CharacterBlock>;
   clock: WorkerClock;
   log: WorkerLog;
@@ -118,6 +119,7 @@ export function createCharacterManager(ports: CharacterManagerPorts) {
 
   function start(name: string): Worker | undefined {
     const block = ports.blocks[name];
+    if (ports.allowed?.(name) === false) { block.enabled = false; ports.lifecycle(name, 'offline'); return; }
     ports.lifecycle(name, "starting");
     const realm = ports.resolveRealm(block.realm);
     if (!realm) {

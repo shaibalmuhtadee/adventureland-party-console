@@ -8,6 +8,7 @@ export interface CombatStrategy {
 
 /** Shared catalog for card controls, request validation and runtime defaults. */
 export const combatStrategies = [
+  { id: 'inventory-cleanout', label: 'Inventory cleanout', description: 'When inventory is full, visit town to sell NPC-tagged items and bank bank-tagged items, then return to farming.', classes: ['warrior', 'priest', 'mage', 'rogue', 'ranger', 'paladin'], defaultEnabled: false },
   { id: 'death-loop', label: 'Death loop', description: 'At 95% XP, die in the arena until XP reaches zero, then resume your task. Repeat whenever XP reaches 95%.', classes: ['warrior', 'priest', 'mage', 'rogue', 'ranger', 'paladin'], defaultEnabled: false },
   { id: 'kiting', label: 'Kiting', description: 'Move around attackers. When off, hold combat position and follow moving targets.', classes: null, defaultEnabled: true },
   { id: 'absorb-sins', label: 'Absorb sins', description: 'Transfer party aggro to the priest during combat.', classes: ['priest'], defaultEnabled: true },
