@@ -745,6 +745,7 @@
 
   // runtime/combat/strategies.ts
   var combatStrategies = [
+    { id: "death-loop", label: "Death loop", description: "At 95% XP, die in the arena until XP reaches zero, then resume your task. Repeat whenever XP reaches 95%.", classes: ["warrior", "priest", "mage", "rogue", "ranger", "paladin"], defaultEnabled: false },
     { id: "kiting", label: "Kiting", description: "Move around attackers. When off, hold combat position and follow moving targets.", classes: null, defaultEnabled: true },
     { id: "absorb-sins", label: "Absorb sins", description: "Transfer party aggro to the priest during combat.", classes: ["priest"], defaultEnabled: true },
     { id: "rspeed", label: "Rspeed", description: "Keep Rogue Swiftness active on yourself and nearby party members. Recover MP before casting when needed.", classes: ["rogue"], defaultEnabled: true },
@@ -1406,6 +1407,7 @@
       if (samples.length) reduce_cooldown("attack", Math.min(remaining, Math.min(...samples)));
     }
     async function castSkill(d) {
+      if (shared.deathLoopActive?.()) return Promise.reject(new Error("Death loop owns combat"));
       if (d.skill === "absorb" && !shared.combatStrategyEnabled?.("absorb-sins"))
         return Promise.reject(new Error("Absorb sins strategy is disabled"));
       if (d.skill === "rspeed" && !shared.combatStrategyEnabled?.("rspeed"))
@@ -3181,6 +3183,116 @@
     };
   }
 
+  // runtime/characters/roles/death-loop.ts
+  function installDeathLoop(root) {
+    const shared = root.sharedRoutine;
+    const host = parent;
+    let entered = false, busy2 = false, stopped = false, returning = false, retryAt = 0;
+    let travelling = false;
+    function enabled() {
+      return !stopped && character.ctype !== "merchant" && strategyEnabled(shared.combatStrategySettings?.(), "death-loop");
+    }
+    function active() {
+      if (!enabled()) {
+        if (!stopped && !entered) host.__partyDeathLoopRunning = false;
+        return entered;
+      }
+      const required = G.levels[character.level];
+      return entered || !!host.__partyDeathLoopRunning || required > 0 && character.xp / required >= 0.95;
+    }
+    function stage(value) {
+      Object.assign(root.partyCombatState, { at: Date.now(), stage: value });
+      set_message(value);
+    }
+    async function finish() {
+      entered = false;
+      host.__partyDeathLoopRunning = false;
+      returning = true;
+      await shared.deathLoopLeave?.();
+      returning = false;
+      stage("death-loop-complete");
+    }
+    async function tick() {
+      if (stopped || busy2 || !active() && !returning || Date.now() < retryAt) return;
+      busy2 = true;
+      try {
+        if (returning) {
+          await finish();
+          return;
+        }
+        if (!enabled()) {
+          await finish();
+          return;
+        }
+        if (!entered) {
+          entered = true;
+          host.__partyDeathLoopRunning = true;
+          await shared.deathLoopEnter?.();
+        }
+        if (!enabled()) return;
+        if (character.rip) {
+          stage("death-loop-respawning");
+          retryAt = Date.now() + 2e3;
+          let timeout;
+          try {
+            await Promise.race([respawn(), new Promise((resolve) => {
+              timeout = setTimeout(resolve, 3e3);
+            })]);
+          } finally {
+            clearTimeout(timeout);
+          }
+          return;
+        }
+        if (character.xp <= 0) {
+          await finish();
+          return;
+        }
+        if (character.map !== "arena") {
+          stage("death-loop-arena");
+          if (!travelling) {
+            travelling = true;
+            void Promise.resolve(shared.deathLoopMove?.("arena")).catch((error) => {
+              if (!stopped && entered && enabled()) {
+                report(error);
+                retryAt = Date.now() + 1e3;
+              }
+            }).finally(() => {
+              travelling = false;
+            });
+          }
+          return;
+        }
+        const target = get_nearest_monster({ min_xp: 100, path_check: true, target: character.name }) || get_nearest_monster({ min_xp: 100, path_check: true, no_target: true });
+        if (!target) {
+          stage("death-loop-no-monsters");
+          return;
+        }
+        stage("death-loop");
+        change_target(target);
+        if (Math.hypot(target.x - character.x, target.y - character.y) > 8)
+          void Promise.resolve(move(
+            character.x + (target.x - character.x) / 6,
+            character.y + (target.y - character.y) / 6
+          )).catch(report);
+        if (!target.target && can_attack(target)) await attack(target);
+      } catch (error) {
+        report(error);
+        retryAt = Date.now() + 1e3;
+      } finally {
+        busy2 = false;
+      }
+    }
+    function report(error) {
+      const reason = errorReason(error);
+      if (reason === "cooldown" || reason === "cant_respawn") return;
+      Object.assign(root.partyCombatState, { error: reason, errorAt: Date.now() });
+      game_log("Death loop: " + reason, "red");
+    }
+    return { active, tick, stop() {
+      stopped = true;
+    } };
+  }
+
   // runtime/characters/roles/default.ts
   var defaultRole = {
     name: "adventurer",
@@ -3272,7 +3384,7 @@
     });
     const recoverFromDeath = createDeathRecovery({
       isDead: () => !!character.rip,
-      blocked: () => !!sharedRoutine.dungeonOwned?.(),
+      blocked: () => !!sharedRoutine.dungeonOwned?.() || !!sharedRoutine.deathLoopActive?.(),
       respawn: () => sharedRoutine.dungeonOwned?.() ? Promise.reject(Error("Dungeon owns revival")) : Promise.resolve(respawn()),
       releaseCombat: () => {
         working = false;
@@ -3290,6 +3402,7 @@
       return active && !character.rip && resolvedRole().combat && (character.ctype !== "merchant" || !!sharedRoutine.merchantEventCombatActive?.()) && !sharedRoutine.isOccupied() && ["pending", "feed"].indexOf(sharedRoutine.getAbtestingMode()) < 0;
     }
     function passingTarget() {
+      if (sharedRoutine.deathLoopActive?.()) return null;
       if (sharedRoutine.dungeonOwned?.()) return null;
       if (character.ctype === "merchant" || !active || character.rip || !resolvedRole().combat || ["pending", "feed"].includes(sharedRoutine.getAbtestingMode())) return null;
       if (sharedRoutine.frankyCombatActive?.()) return sharedRoutine.getWalkingPassiveTarget?.() || null;
@@ -3426,6 +3539,7 @@
       return true;
     }
     function movementTick() {
+      if (sharedRoutine.deathLoopActive?.()) return;
       const dungeon = !!sharedRoutine.dungeonOwned?.();
       try {
         equipmentTick();
@@ -3493,6 +3607,7 @@
         await role8.beforeAttack(target);
     }
     async function lootTick() {
+      if (sharedRoutine.deathLoopActive?.()) return;
       if (looting || !active || character.rip || ["pending", "feed"].includes(sharedRoutine.getAbtestingMode())) return;
       looting = true;
       try {
@@ -3509,6 +3624,8 @@
       const epoch = generation;
       try {
         const role8 = resolvedRole();
+        await root.partyDeathLoop?.tick();
+        if (sharedRoutine.deathLoopActive?.()) return;
         if (character.rip) return;
         if (character.ctype === "rogue") await skills?.maintainRspeed();
         if (!currentEpoch(epoch) || character.rip || sharedRoutine.isOccupied()) return;
@@ -3566,6 +3683,7 @@
           throw new Error("Shared party code is not ready; refusing to start combat timers");
         if (timer) return;
         skills = installSkillRuntime(root);
+        root.partyDeathLoop = installDeathLoop(root);
         equipment2 = installPorcupineEquipment(root);
         itemSwaps = installItemSwaps(root);
         autoConsumable = installAutoConsumable(root);
@@ -3584,6 +3702,7 @@
         movementTimer = setInterval(movementTick, 100);
         void selectTarget();
         respawnTimer = setInterval(function() {
+          if (sharedRoutine.deathLoopActive?.()) return;
           if (character.rip) {
             generation += 1;
             selectedTarget = null;
@@ -3597,6 +3716,7 @@
         void recoverFromDeath();
       },
       stop: function() {
+        root.partyDeathLoop?.stop();
         skills?.stop();
         equipment2?.stop();
         itemSwaps?.stop();

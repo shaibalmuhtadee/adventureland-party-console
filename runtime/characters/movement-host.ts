@@ -44,7 +44,7 @@ export interface MovementOptions {
   // Cave combat may stop direct movement without retiring the dungeon journey.
   retainOnDirectStop?: boolean;
   relocation?: 'town' | 'door';
-  owner?: {convoyId?: string; epoch?: number; commandId?: number; navigationRevision?: number; recoveryStage?: string};
+  owner?: {convoyId?: string; epoch?: number; commandId?: number; navigationRevision?: number; recoveryStage?: string; deathLoop?: boolean};
   transitionComplete?: (destination: Point) => void;
   townAttempt?: (state: 'casting' | 'interrupted' | 'complete' | 'unavailable', index: number, from: Point, destination: Point) => void;
   compareTown?: boolean;
@@ -56,6 +56,7 @@ export interface MovementOptions {
 export interface MovementPorts {
   now(this: void): number;
   context(): MovementContext;
+  allowed?(options: MovementOptions): boolean;
   townReady?(): boolean;
   transitionReady?(): boolean;
   request(path: string, options: { method: string; timeout: number; body: unknown }): Promise<unknown>;

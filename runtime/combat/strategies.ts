@@ -8,6 +8,7 @@ export interface CombatStrategy {
 
 /** Shared catalog for card controls, request validation and runtime defaults. */
 export const combatStrategies = [
+  { id: 'death-loop', label: 'Death loop', description: 'At 95% XP, die in the arena until XP reaches zero, then resume your task. Repeat whenever XP reaches 95%.', classes: ['warrior', 'priest', 'mage', 'rogue', 'ranger', 'paladin'], defaultEnabled: false },
   { id: 'kiting', label: 'Kiting', description: 'Move around attackers. When off, hold combat position and follow moving targets.', classes: null, defaultEnabled: true },
   { id: 'absorb-sins', label: 'Absorb sins', description: 'Transfer party aggro to the priest during combat.', classes: ['priest'], defaultEnabled: true },
   { id: 'rspeed', label: 'Rspeed', description: 'Keep Rogue Swiftness active on yourself and nearby party members. Recover MP before casting when needed.', classes: ['rogue'], defaultEnabled: true },

@@ -13,7 +13,11 @@
   var runtimeGeneration = root.__partyRuntimeGeneration =
     (Number(root.__partyRuntimeGeneration) || 0) + 1;
   function runtimeCurrent() { return Number(root.__partyRuntimeGeneration) === runtimeGeneration; }
+  function deathLoopActive() {
+    return character.ctype !== 'merchant' && !!(root.partyDeathLoop && root.partyDeathLoop.active());
+  }
   var movement = root.installPartyMovement(root, {
+    allowed: function(options) { return !deathLoopActive() || !!(options.owner && options.owner.deathLoop); },
     now: Date.now,
     context: function() { return { runtime: convoyRuntimeId || String(runtimeGeneration), revision: Number(navigationIntent && navigationIntent.revision) || 0,
       current: runtimeCurrent() && (!parent.socket || parent.socket.connected !== false), paused: !!root.__partyMovementPaused || !!(dungeonClient && !dungeonClient.canMove()) }; },
@@ -185,6 +189,7 @@
     return candidates[0];
   }
   async function escapeSurvivalPulse() {
+    if (deathLoopActive()) return;
     if (!runtimeCurrent() || !escapeOwns() || ['recovering','recovery-convoy','complete','failed-hold'].indexOf(escapeState.stage)<0 || character.rip || escapeSurvivalBusy) return;
     var state = escapeState;
     function current() { return runtimeCurrent() && escapeState && escapeState.id === state.id && !character.rip; }
@@ -198,6 +203,7 @@
     } finally { escapeSurvivalBusy = false; }
   }
   async function escapePulse() {
+    if (deathLoopActive()) return;
     if (!runtimeCurrent() || !escapeOwns() || !escapeLocal || escapePulseBusy) return;
     var state = escapeState, local = escapeLocal;
     function current() { return runtimeCurrent() && escapeState && escapeState.id === state.id && escapeState.stage === state.stage && escapeLocal === local; }
@@ -3241,6 +3247,7 @@
     Promise.resolve(stop('smart')).catch(function(){});
   }
   function rareControlCurrent() {
+    if (deathLoopActive()) return false;
     return !!(rareControlState && Date.now() - rareControlAt < 3500 && !navigationIntent.cancelled &&
       rareControlState.revision === navigationIntent.revision && !character.rip &&
       !partyTownActive && !eventTraveling && !joinedEvent && !activeCombatEvent() &&
@@ -9599,6 +9606,7 @@
   }
 
   async function handle(command) {
+    if (deathLoopActive()) return;
     if (root.__partyTracktrixMove) await root.__partyTracktrixMove;
     root.__partyInventoryCommands = (root.__partyInventoryCommands || 0) + 1;
     try {
@@ -10244,6 +10252,7 @@
     parent.__partyReturnProgress=root.__partyReturnProgress=result.progress || Object.assign({},saved,{phase:phase});
   }
   async function enforcePartyTownOverride() {
+    if (deathLoopActive()) return;
     if (escapeOwns()) return;
     if (character.ctype === "merchant" || !partyTownActive || townTraveling || townOverrideInFlight) return;
     var townPoint = { map: "main", x: 0, y: 0 };
@@ -10406,6 +10415,11 @@
       if (!runtimeCurrent()) return;
       acceptCombatStrategies(state);
       root.__partyConsoleMaintenance = state.consoleMaintenance || null;
+      if (deathLoopActive()) {
+        root.__partyStatusSuccessAt = Date.now();
+        if (dashboardSampler) dashboardSampler.renew(state.dashboardLease);
+        return;
+      }
       autoConsumable = state.autoConsumable || null;
       if (root.__partyConsoleMaintenance) {
         if (!consoleMaintenanceBusy() && typeof stop === 'function') await stop('smart');
@@ -11135,6 +11149,7 @@
   }
 
   async function runAnniversaryKiss() {
+    if (deathLoopActive()) return;
     if (character.cave || root.__partyDungeonRuntime && root.__partyDungeonRuntime.owns()) return false;
     if (merchantEventWorkReserved()) return;
     if (!eventSelected("anniversary")) return;
@@ -11726,6 +11741,7 @@
   }
 
   async function runAnniversaryReturns() {
+    if (deathLoopActive()) return;
     if (character.ctype !== "merchant" || anniversaryBusy || merchantForceStand || root.__merchantActiveJob ||
         !anniversaryPlan || !(anniversaryPlan.pendingReturns || []).length) return;
     var debt = anniversaryPlan.pendingReturns[0];
@@ -11761,6 +11777,7 @@
   }
 
   async function runAnniversaryTick() {
+    if (deathLoopActive()) return;
     if (root.__partyConsoleMaintenance) return;
     if (escapeOwns()) return;
     await runAnniversaryKiss();
@@ -12245,6 +12262,7 @@
   }
 
   async function pollEvents() {
+    if (deathLoopActive()) return;
     if (character.cave || root.__partyDungeonRuntime && root.__partyDungeonRuntime.owns()) return false;
     if (root.__partyConsoleMaintenance) return;
     if (escapeOwns()) return;
@@ -12442,6 +12460,7 @@
       !!(root.__partySharedWalking && root.__partySharedWalking.activity === "event-return");
   }
   function reunionBlocked() {
+    if (deathLoopActive()) return true;
     if (dungeonOwned()) return true;
     if (eventExitOwnsMovement()) return true;
     if (escapeOwns()) return true;
@@ -12478,6 +12497,7 @@
       !is_on_cooldown(skill) && can_use(skill);
   }
   function beginFarmReunion(command) {
+    if (deathLoopActive()) return;
     if (dungeonOwned()) return;
     if (eventExitOwnsMovement()) return;
     if (character.ctype === "merchant") return;
@@ -12564,6 +12584,7 @@
   };
   var reunionMagiportHandler = root.on_magiport;
   async function farmReunionTick() {
+    if (deathLoopActive()) return;
     if (dungeonOwned()) {
       if (reunion) { reunion.cancelled = true; reunion.moving = false; }
       reunion = root.__partyReunion = null;
@@ -12798,6 +12819,7 @@
   }
 
   function passiveRegenerationTick() {
+    if (deathLoopActive()) return;
     if (escapeOwns() && ["complete", "failed-hold"].indexOf(escapeState.stage) < 0) return;
     if (!runtimeCurrent() || !passiveRegenerationEligible()) return;
     // Regular heals do not own movement. Top off nearby party members so
@@ -16146,6 +16168,7 @@
     returnAttacker: returnAttacker,
     returnMovementTick: cancelReturnTownUnderAttack,
     isOccupied: function () {
+      if (deathLoopActive()) { root.__partyCombatOwner = 'death-loop'; return true; }
       if (character.cave || root.__partyDungeonRuntime && root.__partyDungeonRuntime.owns())
         return !runtimeCurrent() || !!root.__partyConsoleMaintenance || !!character.cave?.paused;
       if (root.__partyUpgradePreviewInFlight) return true;
@@ -16403,6 +16426,7 @@
         isAttackingPartyMember(target) && (!travelCombatActive() || huntTravelDefense());
     },
     followLeaderIfFar: async function (maximumDistance) {
+      if (deathLoopActive()) return false;
       if (farmApproach.route || farmingMode === "scatter") return false;
       if (partyTownActive || partyConvoyActive || convoyTraveling || departurePending || bankQueued || !this.shouldFollowLeader() || !leaderLocation) return false;
       // A follower can arrive before its leader. Event combat owns that map;
@@ -16676,6 +16700,37 @@
     },
     itemSwapSettings: function () { return itemSwapSettings; },
     combatStrategySettings: function () { return combatStrategySettings; },
+    deathLoopActive: deathLoopActive,
+    deathLoopMove: function(destination) {
+      return smart_move(destination, undefined, { owner: { deathLoop: true }, skipLootWait: true });
+    },
+    deathLoopEnter: async function() {
+      combatTargetId = null;
+      publishCombatSelection(null, true);
+      if (root.partyRoleRunner) root.partyRoleRunner.resetTargeting();
+      cancelGroupRoute(); cancelFightRoute(); cancelRarePath();
+      cancelFarmApproach('death loop owns movement');
+      if (farmingTravelToken) farmingTravelToken.cancelled = true;
+      followingLeader = false;
+      if (reunion) await cancelFarmReunion('death loop owns movement');
+      if (convoyTraveling) {
+        var priorConvoy = convoyTraveling;
+        releaseConvoyCruise(priorConvoy);
+        priorConvoy.cancelled = true;
+        if (priorConvoy.release) priorConvoy.release();
+        lastCommand = root.__partyLastCommand = Math.min(lastCommand, Number(priorConvoy.commandId) - 1);
+        convoyTraveling = null;
+      }
+      resetCombatMovement();
+      await stop();
+    },
+    deathLoopLeave: async function() {
+      await stop();
+      if (root.partyRoleRunner) root.partyRoleRunner.resetTargeting();
+      var result = await rejoinActiveEventAfterRespawn();
+      if (result.status === 'retryable') throw new Error(result.reason || 'Saved event recovery pending');
+      if (result.status === 'not-applicable') beginFarmReunion();
+    },
     autoConsumable: function () {
       return runtimeCurrent() && !root.__partyConsoleMaintenance &&
         (!parent.socket || parent.socket.connected !== false) &&

@@ -11,6 +11,10 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
+  deathLoopActive?(): boolean;
+  deathLoopEnter?(): Promise<void>;
+  deathLoopLeave?(): Promise<void>;
+  deathLoopMove?(destination: string | Pick<Target, 'x' | 'y'>): Promise<unknown>;
   partyBuffTargets?(): import('../skills/types.ts').Combatant[];
   combatStrategySettings?(): import('../../combat/strategies.ts').StrategySettings;
   combatStrategyEnabled?(id: import('../../combat/strategies.ts').CombatStrategyId): boolean;
@@ -143,6 +147,7 @@ export interface RoleRunner {
   stop(): void;
 }
 export interface CombatRoot {
+  partyDeathLoop?: { active(): boolean; tick(): Promise<void>; stop(): void };
   partyItemSwaps?: import('./item-swaps-runtime.ts').ItemSwapRuntime;
   partyPorcupineEquipment?: ReturnType<typeof import("./porcupine-equipment.ts").createPorcupineEquipment>;
   sharedRoutine: SharedCombat;

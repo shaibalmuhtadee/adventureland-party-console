@@ -51,7 +51,7 @@ export function installPartyMovement(host: MovementHost, ports: MovementPorts) {
     if (disposed || journey !== j) return false;
     try {
       const c = ports.context();
-      return c.current && c.runtime === j.context.runtime && c.revision === j.context.revision && !host.character.rip;
+      return c.current && c.runtime === j.context.runtime && c.revision === j.context.revision && !host.character.rip && ports.allowed?.(j.options) !== false;
     } catch { return false; } // A retired runner's guarded parent can no longer be read.
   }
   function finish(done: boolean, failure?: unknown, cause?: Record<string, unknown>) {
@@ -223,6 +223,7 @@ export function installPartyMovement(host: MovementHost, ports: MovementPorts) {
     catch (error) { recover(j, error); }
   }
   function move(destination: unknown, callback?: (done: boolean) => void, options: MovementOptions = {}): Promise<unknown> {
+    if (ports.allowed?.(options) === false) return Promise.reject(Error('Death loop owns movement'));
     if (host.smart_move_logic !== scheduler) return Promise.reject(Error('Movement scheduler was replaced'));
     finish(false, 'Movement replaced by a new destination', {code:'destination-replaced',replacement:destination});
     refreshGeometry();

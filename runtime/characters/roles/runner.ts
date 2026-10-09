@@ -11,6 +11,7 @@ import {installQueueClient} from '../../combat/client.ts';
 import {installQueueMarkers} from '../../combat/markers.ts';
 import {installLootClient} from '../../combat/departure-loot.ts';
 import { createDeathRecovery } from "./death-recovery.ts";
+import { installDeathLoop } from './death-loop.ts';
 import { defaultRole } from "./default.ts";
 import { targetRejection, eligibleSelection } from "./target-state.ts";
 import { errorReason, type Role, type CombatRoot, type Target } from "./types.ts";
@@ -68,7 +69,7 @@ export function installRoleRunner(
   });
   const recoverFromDeath = createDeathRecovery({
     isDead: () => !!character.rip,
-    blocked: () => !!sharedRoutine.dungeonOwned?.(),
+    blocked: () => !!sharedRoutine.dungeonOwned?.() || !!sharedRoutine.deathLoopActive?.(),
     respawn: () => sharedRoutine.dungeonOwned?.() ? Promise.reject(Error('Dungeon owns revival')) : Promise.resolve(respawn()),
     releaseCombat: () => {
       working = false;
@@ -95,6 +96,7 @@ export function installRoleRunner(
     );
   }
   function passingTarget(): Target | null {
+    if (sharedRoutine.deathLoopActive?.()) return null;
     if (sharedRoutine.dungeonOwned?.()) return null;
     if (character.ctype === "merchant" || !active || character.rip || !resolvedRole().combat || ["pending","feed"].includes(sharedRoutine.getAbtestingMode())) return null;
     if (sharedRoutine.frankyCombatActive?.()) return sharedRoutine.getWalkingPassiveTarget?.() || null;
@@ -225,6 +227,7 @@ export function installRoleRunner(
     return true;
   }
   function movementTick() {
+    if (sharedRoutine.deathLoopActive?.()) return;
     const dungeon = !!sharedRoutine.dungeonOwned?.();
     try {
       equipmentTick();
@@ -289,6 +292,7 @@ export function installRoleRunner(
       await role.beforeAttack(target);
   }
   async function lootTick(): Promise<void> {
+    if (sharedRoutine.deathLoopActive?.()) return;
     if (looting || !active || character.rip || ["pending", "feed"].includes(sharedRoutine.getAbtestingMode())) return;
     looting = true;
     try {
@@ -307,6 +311,8 @@ export function installRoleRunner(
     const epoch = generation;
     try {
       const role = resolvedRole();
+      await root.partyDeathLoop?.tick();
+      if (sharedRoutine.deathLoopActive?.()) return;
       if (character.rip) return;
       if (character.ctype === 'rogue') await skills?.maintainRspeed();
       if (!currentEpoch(epoch) || character.rip || sharedRoutine.isOccupied()) return;
@@ -344,6 +350,7 @@ export function installRoleRunner(
         throw new Error("Shared party code is not ready; refusing to start combat timers");
       if (timer) return;
       skills = installSkillRuntime(root);
+      root.partyDeathLoop = installDeathLoop(root);
       equipment = installPorcupineEquipment(root);
       itemSwaps = installItemSwaps(root);
       autoConsumable = installAutoConsumable(root);
@@ -360,6 +367,7 @@ export function installRoleRunner(
       movementTimer = setInterval(movementTick, 100);
       void selectTarget();
       respawnTimer = setInterval(function () {
+        if (sharedRoutine.deathLoopActive?.()) return;
         if (character.rip) {
           generation += 1;
           selectedTarget = null;
@@ -373,6 +381,7 @@ export function installRoleRunner(
       void recoverFromDeath();
     },
     stop: function () {
+      root.partyDeathLoop?.stop();
       skills?.stop();
       equipment?.stop();
       itemSwaps?.stop();

@@ -10,6 +10,14 @@ Activate with the supported coordinator/dashboard-only restart.
 # Character coordinator
 
 Character cards expose a collapsed Strategies section below Farming settings.
+Death loop defaults off and is available to every combat class, excluding
+merchants. When enabled, it takes control at 95% XP, travels to the arena,
+provokes monsters without healing or kiting, and respawns until XP is zero.
+After the final respawn it resumes the saved event/task or farm. The toggle
+stays enabled and triggers again at 95% XP. Runner reloads preserve an active
+loop. Disabling it releases control and resumes the saved activity. Publish
+with the full supported restart. Manually verify the 95% trigger, repeated
+deaths, final respawn, return to farming, retrigger, disable and class visibility.
 The per-character catalog and defaults live in `runtime/combat/strategies.ts`;
 settings persist in `combatStrategies` and use the dashboard export/import path.
 Kiting defaults on. Turning it off stops orbit/escape and rogue batch positioning;

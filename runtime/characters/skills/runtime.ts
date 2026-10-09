@@ -101,6 +101,7 @@ export function installSkillRuntime(root: CombatRoot) {
     if (samples.length) reduce_cooldown('attack', Math.min(remaining, Math.min(...samples)));
   }
   async function castSkill(d:SkillDecision):Promise<unknown> {
+    if (shared.deathLoopActive?.()) return Promise.reject(new Error('Death loop owns combat'));
     if (d.skill === 'absorb' && !shared.combatStrategyEnabled?.('absorb-sins'))
       return Promise.reject(new Error('Absorb sins strategy is disabled'));
     if (d.skill === 'rspeed' && !shared.combatStrategyEnabled?.('rspeed'))

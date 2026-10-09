@@ -688,7 +688,7 @@
       if (disposed || journey !== j) return false;
       try {
         const c = ports.context();
-        return c.current && c.runtime === j.context.runtime && c.revision === j.context.revision && !host.character.rip;
+        return c.current && c.runtime === j.context.runtime && c.revision === j.context.revision && !host.character.rip && ports.allowed?.(j.options) !== false;
       } catch {
         return false;
       }
@@ -964,6 +964,7 @@
       }
     }
     function move(destination, callback, options = {}) {
+      if (ports.allowed?.(options) === false) return Promise.reject(Error("Death loop owns movement"));
       if (host.smart_move_logic !== scheduler) return Promise.reject(Error("Movement scheduler was replaced"));
       finish(false, "Movement replaced by a new destination", { code: "destination-replaced", replacement: destination });
       refreshGeometry();
