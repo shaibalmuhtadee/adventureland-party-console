@@ -1646,7 +1646,7 @@
   function itemDefinition(item) {
     if (!item || !G.items[item.name]) return null;
     var definition = G.items[item.name];
-    var skin = item.skin || definition.skin;
+    var skin = item.expires && definition.skin_a ? definition.skin_a : item.skin || definition.skin;
     var position = G.positions[skin];
     var pack = position && G.imagesets[position[0] || "pack_20"];
     var safeDefinition = safeItemDefinition(definition);
