@@ -762,6 +762,10 @@
   // only the precomputed valuation probabilities are adjusted.
   var valuationLuckMultiplier = 1.15;
   var merchantCatalogVersion = "exchange-rewards-v4";
+  var AUTOMATIC_CALL_MAX_CC = 170;
+  function automaticCallBudgetAvailable(cost) {
+    return (Number(character.cc) || 0) + cost <= AUTOMATIC_CALL_MAX_CC;
+  }
   var trackerDropData = typeof tracker !== "undefined" && tracker && Object.keys(tracker).length ? tracker : null;
   var trackerCatalogInitialized = !!trackerDropData;
   // The native game updates parent.tracker before calling render_tracker.
@@ -809,6 +813,8 @@
   }
   function requestTrackerSnapshot() {
     if (!trackerWasHeld) return;
+    // Native limitdcreport charges 50 for tracker; leave room for combat and transfers.
+    if (!automaticCallBudgetAvailable(50)) { scheduleTrackerSnapshot(1000); return; }
     // Retry a missing response; a successful response schedules the slower refresh.
     scheduleTrackerSnapshot(2000);
     if (requestSilentTracker) requestSilentTracker();
@@ -848,6 +854,8 @@
       .sort(function (a, b) { return a.localeCompare(b); });
   };
   function requestPlayerDirectory() {
+    // Directory polling costs 12 and can coincide with a collection burst.
+    if (!automaticCallBudgetAvailable(12)) return;
     if (parent.socket && typeof parent.socket.emit === "function") parent.socket.emit("players", {});
   }
   var merchantMarketLocation = { map: "main", x: -63, y: 100 };
@@ -5192,13 +5200,10 @@
   }
 
   // Transfers share the native call budget with attacks without stopping combat.
-  var COMBAT_HANDOFF_MAX_CC = 170;
-  var MERCHANT_HANDOFF_SEND_INTERVAL = 500, merchantHandoffLastSendAt = 0;
   async function waitForCallBudget(deadline) {
     var owner = lastCommand, revision = navigationIntent.revision;
-    // Space sends so native call-cost reports can catch up between transfers.
-    while ((Number(character.cc) || 0) > COMBAT_HANDOFF_MAX_CC ||
-        Date.now() - merchantHandoffLastSendAt < MERCHANT_HANDOFF_SEND_INTERVAL) {
+    // Each send awaits its native acknowledgement; only high call cost adds a delay.
+    while (!automaticCallBudgetAvailable(4)) {
       if (!runtimeCurrent() || character.rip || owner !== lastCommand || navigationIntent.revision !== revision)
         throw new Error("interrupted");
       if (Date.now() >= deadline) throw new Error("combat handoff timed out waiting for call budget");
@@ -5380,7 +5385,6 @@
         itemQuantity(character.items[slot]));
       if (requests[i].mark && (requests[i].mark.deconstructionId || requests[i].mark.npcSaleId) && (character.items[slot].l || character.items[slot].b)) continue;
       var clearsSlot = sendQuantity >= itemQuantity(character.items[slot]);
-      merchantHandoffLastSendAt = Date.now();
       await send_item(command.merchant, slot, sendQuantity);
       if (clearsSlot) cleanoutFreeSlots += 1;
       sent.push(requests[i]);
@@ -5403,7 +5407,6 @@
       assertMerchantContinuation(command);
       excess = Math.max(0, character.gold);
       if (excess) {
-        merchantHandoffLastSendAt = Date.now();
         await send_gold(command.merchant, excess);
       }
     }
