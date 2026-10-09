@@ -60,6 +60,9 @@ publication, rollback, and cleanup use store locks. No time-based grace period i
 used. A loader racing many rapid publications can retry the newest manifest;
 already executing character code remains in memory.
 
-An interrupted process can leave `operation.lock` behind. Inspect its
-`owner.json`, confirm that PID is no longer running and no build is active, then
-remove that specific lock directory. Locks are never stolen based only on age.
+An interrupted process can leave `operation.lock` behind. The store reclaims
+it automatically when `owner.json` names a PID that is no longer running
+(`ESRCH`); live owners are never disturbed and locks are never stolen based
+only on age. If the lock persists, inspect its `owner.json`, confirm that
+PID is no longer running and no build is active, then remove that specific
+lock directory.

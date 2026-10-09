@@ -18,14 +18,64 @@ export async function withBuildLock<T>(directory: string, action: () => Promise<
   const lock = path.join(directory, 'operation.lock');
   try { await mkdir(lock); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === 'EEXIST')
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
+    if (await reclaimStaleLock(lock)) {
+      try { await mkdir(lock); }
+      catch (retry) {
+        if ((retry as NodeJS.ErrnoException).code === 'EEXIST')
+          throw new Error('Build store is locked: ' + lock + '. Retry after the active operation finishes.');
+        throw retry;
+      }
+    } else {
       throw new Error('Build store is locked: ' + lock + '. Retry after the active operation finishes.');
-    throw error;
+    }
   }
   try {
     await writeFile(path.join(lock, 'owner.json'), JSON.stringify({pid: process.pid, startedAt: new Date().toISOString()}));
     return await action();
   } finally { await unlink(path.join(lock, 'owner.json')).catch(() => {}); await rmdir(lock); }
+}
+// A crashed process can leave operation.lock behind. Reclaim it only when its
+// recorded owner is provably dead (process.kill(pid, 0) reports ESRCH), never
+// based on age alone. The stale directory is moved aside atomically so two
+// reclaimers cannot both claim the lock, and a changed owner aborts the
+// reclaim instead of deleting a live lock.
+async function reclaimStaleLock(lock: string): Promise<boolean> {
+  let owner: {pid: unknown} | undefined;
+  try { owner = await readJson<{pid: unknown}>(path.join(lock, 'owner.json')); }
+  catch { return false; }
+  if (!isLockPid(owner?.pid)) {
+    // Another process may have acquired the lock but not recorded ownership
+    // yet, so give it time to appear before treating the lock as stale.
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    try { owner = await readJson<{pid: unknown}>(path.join(lock, 'owner.json')); }
+    catch { return false; }
+  }
+  const pid = owner?.pid;
+  if (!isLockPid(pid)) return takeStaleLock(lock, undefined);
+  try { process.kill(pid, 0); return false; }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ESRCH') return false;
+    return takeStaleLock(lock, pid);
+  }
+}
+function isLockPid(pid: unknown): pid is number {
+  return typeof pid === 'number' && Number.isInteger(pid) && pid > 0;
+}
+async function takeStaleLock(lock: string, expectedPid: number | undefined): Promise<boolean> {
+  const stale = lock + '.stale.' + randomUUID();
+  try { await rename(lock, stale); }
+  catch { return false; }
+  let current: {pid: unknown} | undefined;
+  try { current = await readJson<{pid: unknown}>(path.join(stale, 'owner.json')); }
+  catch { await rename(stale, lock).catch(() => {}); return false; }
+  if (current?.pid !== expectedPid) {
+    await rename(stale, lock).catch(() => {});
+    return false;
+  }
+  await unlink(path.join(stale, 'owner.json')).catch(() => {});
+  await rmdir(stale).catch(() => {});
+  return true;
 }
 export interface Removal { path: string; bytes: number }
 // Inspect every component and descendant before deleting. Never follow a junction
