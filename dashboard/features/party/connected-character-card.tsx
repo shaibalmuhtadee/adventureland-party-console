@@ -10,6 +10,7 @@ import { CharacterMapSection } from './character-map-section';
 import { MonsterDetailsDialog } from './monster-details-dialog';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { FarmingModeControl } from './farming-mode-control';
+import { CombatStrategies } from './combat-strategies';
 import { farmingContext } from './farming-context';
 import { GoldTargetControl } from './gold-target-control';
 import { MerchantCardControls } from './merchant-card-controls';
@@ -400,6 +401,9 @@ export const ConnectedCharacterCard = memo(function ConnectedCharacterCard({
             onSelect={onSelectFarmingPolicy}
           />
         ) : null}
+        {char.ctype !== 'merchant' && <CombatStrategies ctype={char.ctype}
+          settings={state.combatStrategies?.[name]}
+          onToggle={(strategy, enabled) => post('/combat-strategies', { character: name, strategy, enabled })} />}
         {char.name === state.merchantCharacter ? (
           <GoldTargetControl
             character={char.name}

@@ -63,6 +63,7 @@ function giveawayPayload(
  * what the dashboard needs to poll quickly.
  */
 const configFields = [
+  'combatStrategies',
   "itemSwaps",
   "characterAppearances", "merchantRules",
   "bankboiPrefix", "anniversaryAutoChat", "farmingProfiles",

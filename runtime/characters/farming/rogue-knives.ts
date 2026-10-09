@@ -6,12 +6,11 @@ type Point = Pick<SkillWorld['actor'], 'x' | 'y'> & { map: string };
 export interface RogueKnifePositionDiagnostic {
   at: number; visible: number; inRegion: number; inRange: number; maxTargets: number;
   expectedTargets: number; destination: Point; holdUntil: number;
-  reason: 'spawn center' | 'waiting for targets' | 'enough targets' | 'better batch' | 'no worthwhile move' | 'refreshing Kane aura' | 'targets outside knife range';
+  reason: 'spawn center' | 'waiting for targets' | 'enough targets' | 'better batch' | 'no worthwhile move';
 }
 interface PositionPorts {
   world(): SkillWorld;
   center(): Point | null;
-  auraRecovery(actor: SkillWorld['actor']): Point | null;
   contains(point: Point): boolean;
   canMove(point: Point): boolean;
   move(point: Point): boolean;
@@ -58,30 +57,12 @@ export function createRogueKnifePositioner(ports: PositionPorts) {
     }
     return { center, eligible, cap, range, count, here, current, report };
   }
-  function crabPosition(s: ReturnType<typeof sample>): Point {
-    if (s.count(s.center) > 0) return s.center;
-    // Crabs can all survive beyond the center's knife range. Holding there
-    // forever prevents kills and therefore prevents any replacement spawns.
-    if (s.current > 0) return s.here;
-    const targets = s.eligible.filter(t => ports.contains({ map: s.center.map, x: t.x, y: t.y }))
-      .sort((a, b) => Math.hypot(a.x-s.here.x, a.y-s.here.y) - Math.hypot(b.x-s.here.x, b.y-s.here.y));
-    for (const target of targets) {
-      const distance = Math.hypot(target.x-s.here.x, target.y-s.here.y);
-      const fraction = Math.max(0, distance-s.range*0.8) / Math.max(1, distance);
-      const point = { map: s.center.map, x: s.here.x+(target.x-s.here.x)*fraction,
-        y: s.here.y+(target.y-s.here.y)*fraction };
-      if (ports.contains(point) && ports.canMove(point) && s.count(point) > 0) return point;
-    }
-    return s.center;
-  }
   return {
     reset,
     held() {
       if (!moving || Date.now() >= moving.holdUntil || !ports.center()) return false;
       const w = ports.world();
-      // Aura recovery must never defer a ready Fan of Knives cast.
-      if (w.context.farmingScript === 'lone-crab' &&
-          (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0)) return false;
+      if (stationaryCrabFarm(w.context)) return false;
       return !!w.context.farmingScript &&
         eligibleTargets(w).filter(t => w.range(t, 'fanofknives')).length <= 2;
     },
@@ -91,16 +72,9 @@ export function createRogueKnifePositioner(ports: PositionPorts) {
       const key = JSON.stringify([w.context.farmingScript, w.context.farmingFocus, center]);
       if (key !== region) { reset(); region = key; }
       const s = sample(w, center);
-      const refresh = ports.auraRecovery(w.actor);
-      if (refresh) {
+      if (stationaryCrabFarm(w.context)) {
         moving = null; planAt = 0;
-        s.report(refresh, 'refreshing Kane aura'); return ports.move(refresh);
-      }
-      if (stationaryCrabFarm(w.context) && s.count(center) === 0 && s.eligible.length > 0) {
-        moving = null; planAt = 0;
-        const point = crabPosition(s);
-        s.report(point, 'targets outside knife range');
-        return ports.move(point);
+        s.report(center, 'spawn center'); return ports.move(center);
       }
       if (!centered) {
         centered = length(s.here,center) <= 2;

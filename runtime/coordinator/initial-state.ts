@@ -22,6 +22,7 @@ import type { SavedServiceSettings } from "./persistence/settings-contracts.ts";
 import type { loadCoordinatorBankVaults } from "./infrastructure/game-data.ts";
 import type { ResourceBlock } from "./merchant/queue.ts";
 import { validItemSwapMap, type ItemSwaps } from '../item-swaps.ts';
+import { restoreCharacterStrategies } from '../combat/strategies.ts';
 
 type Settings = Record<string, unknown> &
   SavedServiceSettings &
@@ -99,6 +100,7 @@ export function createInitialCoordinatorState<Merchant extends string | null = s
     restockPolicies: persistedSettings.restockPolicies || {},
     autoConsumables: persistedSettings.autoConsumables || {},
     itemSwaps: validItemSwapMap(persistedSettings.itemSwaps) ? persistedSettings.itemSwaps : {} satisfies ItemSwaps,
+    combatStrategies: restoreCharacterStrategies(persistedSettings.combatStrategies),
     ...initialMerchantRuntime<Merchant>(persistedSettings, ports.merchantDefault),
     ...initialCoordinatorHistory(persistedHistory, persistedSettings),
     ...initialMarketObservations(),

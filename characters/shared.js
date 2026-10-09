@@ -612,6 +612,8 @@
   root.__partyEventTimer = null;
   var partyPositions = [];
   var itemSwapSettings = [];
+  var combatStrategySettings = {};
+  var combatStrategySettingsAt = 0;
   var autoConsumable = null;
   var bankStackHomes = {};
   var reunion = root.__partyReunion || null, reunionWorking = false;
@@ -10402,6 +10404,7 @@
       statusPhase = "request status";
       var state = await request("/status", { method: "POST", body: statusBody });
       if (!runtimeCurrent()) return;
+      acceptCombatStrategies(state);
       root.__partyConsoleMaintenance = state.consoleMaintenance || null;
       autoConsumable = state.autoConsumable || null;
       if (root.__partyConsoleMaintenance) {
@@ -13285,7 +13288,16 @@
         threats:groupedThreatReports(),sightings:groupedSightings(),ack:groupedAcknowledgement(),handoff:root.partyQueueClient && root.partyQueueClient.handoff && root.partyQueueClient.handoff.report(),queueAck:groupedCombat && groupedCombat.queueRevision,
         anchorVisible:groupedAnchorVisible(),state:groupedCombat}};
   }
+  function acceptCombatStrategies(state) {
+    if (state.combatStrategies && (!state.serverNow || state.serverNow >= combatStrategySettingsAt)) {
+      var wasKiting = combatStrategyEnabled('kiting');
+      combatStrategySettings = state.combatStrategies[character.name] || {};
+      combatStrategySettingsAt = state.serverNow || 0;
+      if (wasKiting && !combatStrategyEnabled('kiting')) resetCombatMovement();
+    }
+  }
   function acceptCombatControl(state) {
+    acceptCombatStrategies(state);
     if(state.passingControl && (!state.serverNow || state.serverNow>=(root.__partyHuntTravelAt||0))) {
       var beforeHunt=root.__partyHuntTravel, nextHunt=state.passingControl.hunt || null;
       if(nextHunt && nextHunt.primary && (!beforeHunt || !beforeHunt.primary || passingKey(beforeHunt.primary)!==passingKey(nextHunt.primary)) && typeof game_log==='function')
@@ -15416,8 +15428,26 @@
   }
 
   var formationPerformance = { ticks: 0, totalMs: 0, maxMs: 0, candidates: 0, collisionChecks: 0 };
+  function combatStrategyEnabled(id) {
+    return root.sharedRoutine && root.sharedRoutine.combatStrategyEnabled ?
+      root.sharedRoutine.combatStrategyEnabled(id) : combatStrategySettings[id] !== false;
+  }
+  function stationaryCombatMove(target) {
+    if (!target || target.dead) return false;
+    var priest = formationMembers().filter(function(member) { return member.ctype === 'priest'; })
+      .sort(function(a,b) { return Number(b.name === leader) - Number(a.name === leader) || a.name.localeCompare(b.name); })[0] || null;
+    var destination = root.sharedRoutine.stationaryCombatDestination &&
+      root.sharedRoutine.stationaryCombatDestination(target, priest, desiredCombatRange());
+    kiteState.targetId = null;
+    if (!destination) return holdFormation(target, 'No reachable stationary combat position');
+    // Position tolerance must never leave a melee fighter outside attack range.
+    if (is_in_range(target) && Math.hypot(destination.x-character.x,destination.y-character.y) <= 3)
+      return holdFormation(target, 'Kiting disabled; holding combat position');
+    return sendCombatMove(target, destination, 'stationary-positioning');
+  }
   function formationMove(target) {
     if (typeof frankyCombatActive === "function" && frankyCombatActive()) return false;
+    if (!combatStrategyEnabled('kiting')) return stationaryCombatMove(target);
     if(!character.cave && root.partyQueueClient && root.partyQueueClient.formation && root.partyQueueClient.formation.movement())return true;
     var context = [character.map, character.in, character.rip, joinedEvent, eventTraveling].join(":");
     if (formationState.mapContext !== context) {
@@ -15746,7 +15776,7 @@
   function desiredCombatRange() {
     var range = Math.max(1, Number(character.range) || 25);
     // Stay deep inside melee range so a moving target cannot immediately leave it.
-    if (character.ctype === "warrior" && range < 100) return Math.max(1, Math.min(4, range * 0.125));
+    if (combatStrategyEnabled('kiting') && character.ctype === "warrior" && range < 100) return Math.max(1, Math.min(4, range * 0.125));
     return Math.max(1, range - Math.min(12, Math.max(2, range * 0.05)));
   }
   function combatDistance(target) {
@@ -15841,6 +15871,7 @@
   async function kiteIfNeeded(target) {
     if (typeof frankyCombatActive === "function" && frankyCombatActive()) return false;
     if(typeof returnCombatActive==='function' && returnCombatActive())return false;
+    if (!combatStrategyEnabled('kiting')) return stationaryCombatMove(target);
     var attacker = target && target.target === character.name ? target : Object.keys(parent.entities || {})
       .map(function (id) { return parent.entities[id]; }).filter(function (enemy) {
         return enemy && enemy.type === "monster" && enemy.visible && !enemy.dead && enemy.target === character.name;
@@ -15903,6 +15934,7 @@
   async function approachCombatTarget(target) {
     if (typeof frankyCombatActive === "function" && frankyCombatActive()) return frankyMovementTick(target);
     if (!target || target.dead) return false;
+    if (!combatStrategyEnabled('kiting')) return stationaryCombatMove(target);
     var delta = combatDistance(target) - desiredCombatRange();
     var tolerance = Math.min(3, Math.max(0.5, Number(character.range) * 0.01));
     if (Math.abs(delta) <= tolerance && is_in_range(target)) return false;
@@ -15929,17 +15961,7 @@
         !partyLocation || partyLocation.map !== character.map || navigationIntent.cancelled ||
         root.sharedRoutine.isOccupied() || activeCombatEvent() || joinedEvent || dungeonOwned() ||
         travelCombatActive() || returnCombatActive() || typeof rareActive === 'function' && rareActive()) return null;
-    if (farmingMode === 'scatter') return { map: partyLocation.map, x: partyLocation.x, y: partyLocation.y };
-    // The legacy crab strategy requires a solo fighter; Scatter farms independently.
-    // Count the actual roster, including off-map members. Missing class data cannot prove solo.
-    var party = typeof get_party === 'function' && get_party() || {};
-    if (currentPartyList().some(function(name) {
-      if (name === character.name) return false;
-      var member = get_player(name) || party[name] || partyPositions.find(function(p) { return p.name === name; });
-      return !member || (member.ctype || member.type) !== 'merchant';
-    })) return null;
-    // Console followers can be assigned before the native party has assembled.
-    if (groupedFresh() && groupedCombat.members.some(function(name) { return name !== character.name; })) return null;
+    // Crab focus always owns stationary farming, including with other fighters.
     return { map: partyLocation.map, x: partyLocation.x, y: partyLocation.y };
   }
 
@@ -16334,6 +16356,13 @@
       return !!(leaderStatus && leaderStatus.team === eventTeam(character));
     },
     isLeader: function () { return (leader || character.name) === character.name; },
+    partyBuffTargets: function () {
+      return [character].concat(currentPartyList().filter(function(name) { return name !== character.name; })
+        .map(function(name) { return get_player(name); })).filter(function(member) {
+          return member && !member.rip && member.hp > 0 && member.map === character.map &&
+            (member.in == null || character.in == null || member.in === character.in);
+        });
+    },
     combatContext: function () {
       var event = character.cave ? { name: "cave", types: [] } : activeCombatEvent();
       var roster = currentPartyList();
@@ -16353,6 +16382,7 @@
         G.maps[character.map] && G.maps[character.map].event === event.name ||
         monsters.some(function(m){return event.types.indexOf(m.mtype) >= 0;}));
       return { leader: leader || character.name, allies: allies, monsters: monsters,
+        strategies: combatStrategySettings,
         farmingScript: rogueKnifeFarm() ? farmingMode === 'scatter' ? 'rogue-scatter' : 'lone-crab' : undefined,
         farmingFocus: monsterFocus.slice(),
         event: eventCombat ? event.name : null,
@@ -16645,6 +16675,7 @@
       return target && target.visible && !target.dead ? target : null;
     },
     itemSwapSettings: function () { return itemSwapSettings; },
+    combatStrategySettings: function () { return combatStrategySettings; },
     autoConsumable: function () {
       return runtimeCurrent() && !root.__partyConsoleMaintenance &&
         (!parent.socket || parent.socket.connected !== false) &&

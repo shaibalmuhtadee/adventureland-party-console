@@ -63,6 +63,9 @@ function safePull(w: SkillWorld, d: SkillDecision): boolean {
   return w.actor.hp - incomingDps({ ...w, context }, w.actor) * 2 > w.actor.max_hp * .3;
 }
 export function blocked(w: SkillWorld, d: SkillDecision, pending = 0): string | null {
+  if (d.skill === 'absorb' && w.context.strategies?.['absorb-sins'] === false) return 'Absorb sins strategy disabled';
+  if (d.skill === 'rspeed' && w.context.strategies?.rspeed === false) return 'Rspeed strategy disabled';
+  if (d.skill === 'mentalburst' && w.context.strategies?.mentalburst === false) return 'Mentalburst strategy disabled';
   if (w.context.mode === 'blocked' || w.actor.rip) return 'combat activity blocked';
   if (!ownsAggro(w, d)) return 'leader owns aggro transfers';
   if (!unlocked(w, d.skill)) return 'level, equipment, or requirements';

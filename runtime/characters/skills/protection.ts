@@ -1,8 +1,10 @@
 import { decision, health, type SkillWorld, type SkillDecision, type Combatant } from './types.ts';
 import { cost, reserve, unlocked } from './eligibility.ts';
 import { endangered, incomingDps, safeTransfer } from './damage.ts';
+import { strategyEnabled } from '../../combat/strategies.ts';
 
 export function absorbDecision(w: SkillWorld): SkillDecision | null {
+  if (!strategyEnabled(w.context.strategies, 'absorb-sins')) return null;
   if (w.actor.ctype !== 'priest' || w.context.leader !== w.actor.name) return null;
   if (w.actor.mp - cost(w, 'absorb') < cost(w, 'heal')) return null;
   const ally = w.context.allies.filter(a => a.name !== w.actor.name &&
@@ -86,12 +88,14 @@ export function paladinSupport(w: SkillWorld): SkillDecision[] {
   return [selfHeal(w), shield(w), cleanse(w), oath(w), beacon(w), aura(w)]
     .filter((d): d is SkillDecision => !!d);
 }
-export function rogueSupport(w: SkillWorld): SkillDecision[] {
-  const rogues = w.context.allies.filter(a => a.ctype === 'rogue' && a.level >= 40)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  if (rogues[0]?.name !== w.actor.name) return [];
-  const target = w.context.allies.find(a => (!a.s?.rspeed || (a.s.rspeed.ms || 0) < 60000) && w.range(a, 'rspeed'));
-  return target ? [decision('rspeed', [target], 'maintenance', 'maintain party swiftness')] : [];
+export function rspeedDecision(w: SkillWorld): SkillDecision | null {
+  if (w.actor.ctype !== 'rogue' || !strategyEnabled(w.context.strategies, 'rspeed') || !unlocked(w, 'rspeed')) return null;
+  // Renew early enough to recover mana and buff the party one member at a time.
+  const target = w.context.allies.filter(a => !a.dead && !a.rip && a.hp > 0 &&
+    (!a.s?.rspeed || a.s.rspeed.ms !== undefined && a.s.rspeed.ms <= 60000) && w.range(a, 'rspeed'))
+    .sort((a, b) => (a.s?.rspeed?.ms ?? 0) - (b.s?.rspeed?.ms ?? 0) ||
+      Number(b.name === w.actor.name) - Number(a.name === w.actor.name) || a.name.localeCompare(b.name))[0];
+  return target ? decision('rspeed', [target], 'maintenance', 'maintain party swiftness') : null;
 }
 export function combatBuffSupport(w: SkillWorld): SkillDecision[] {
   const skill = w.actor.ctype === 'warrior' ? 'warcry' :

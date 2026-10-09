@@ -4,13 +4,15 @@ import { createSkillEngine } from './engine.ts';
 import { decision, type Actor, type Combatant, type CombatContext, type SkillDefinition, type SkillDecision, type SkillId, type SkillWorld } from './types.ts';
 import { incomingDps } from './damage.ts';
 import { createProjectileTracker } from './projectiles.ts';
-import { createRogueKnifePositioner } from '../farming/rogue-knives.ts';
-import { createKaneAuraRecovery } from '../farming/kane-aura.ts';
+import { createRogueKnifePositioner, stationaryCrabFarm } from '../farming/rogue-knives.ts';
+import { strategyEnabled } from '../../combat/strategies.ts';
+import { stationaryPosition } from '../../combat/stationary-position.ts';
 
 interface Host {
   damage_multiplier?(this: void, defense: number): number;
   is_disabled?(actor: Actor): boolean;
   next_skill?: Partial<Record<SkillId, Date>>;
+  pings?: number[];
   socket?: { connected: boolean;
     on?(event: string, listener: (data: object) => void): void;
     off?(event: string, listener: (data: object) => void): void;
@@ -31,10 +33,21 @@ export function mitigation(defense: number): number {
 export function installSkillRuntime(root: CombatRoot) {
   const host = parent as unknown as Host;
   const shared = root.sharedRoutine;
+  shared.combatStrategyEnabled = id => strategyEnabled(shared.combatStrategySettings?.(), id);
+  shared.stationaryCombatDestination = (target, priest, desiredRange) => stationaryPosition({
+    actor: character, target, priest, desiredRange,
+    distance: point => distance({ ...character, x: point.x, y: point.y, real_x: point.x, real_y: point.y }, target),
+    canMove: point => can_move_to(point.x, point.y),
+  });
   const projectiles = createProjectileTracker(world);
-  function world(): SkillWorld {
+  function world(skill?: SkillId): SkillWorld {
     const actor: Actor = character;
-    const context: CombatContext = shared.combatContext?.() || {
+    // Friendly buff upkeep can run while navigation owns combat movement.
+    const context: CombatContext = skill === 'rspeed' ? {
+      leader: actor.name, allies: shared.partyBuffTargets?.() || [], monsters: [],
+      strategies: shared.combatStrategySettings?.(), mode: host.socket?.connected ? 'grouped' : 'blocked',
+      event: null, observedAt: Date.now(),
+    } : shared.combatContext?.() || {
       leader: '', allies: [], monsters: [], mode: 'blocked', event: null, observedAt: 0,
     };
     if (host.is_disabled?.(actor)) context.mode = 'blocked';
@@ -79,22 +92,32 @@ export function installSkillRuntime(root: CombatRoot) {
     return frankyExcluded.has(id) || !!world().skills[id]?.hostile &&
       targets.some(t => t.type !== 'monster' || t.mtype !== 'franky' || !shared.skillTargetAllowed?.(t as Target));
   }
-  function castSkill(d:SkillDecision):Promise<unknown> {
+  function compensateCrabCooldown() {
+    if (!stationaryCrabFarm(world().context) || typeof reduce_cooldown !== 'function') return;
+    const samples = (host.pings || []).filter(p => Number.isFinite(p) && p >= 0);
+    const remaining = Math.max(0, Number(host.next_skill?.attack) - Date.now()) || 0;
+    // Native skill_timeout updates the whole attack family. Compensate once,
+    // after acknowledgement, using the lowest observed round-trip time.
+    if (samples.length) reduce_cooldown('attack', Math.min(remaining, Math.min(...samples)));
+  }
+  async function castSkill(d:SkillDecision):Promise<unknown> {
+    if (d.skill === 'absorb' && !shared.combatStrategyEnabled?.('absorb-sins'))
+      return Promise.reject(new Error('Absorb sins strategy is disabled'));
+    if (d.skill === 'rspeed' && !shared.combatStrategyEnabled?.('rspeed'))
+      return Promise.reject(new Error('Rspeed strategy is disabled'));
+    if (d.skill === 'mentalburst' && !shared.combatStrategyEnabled?.('mentalburst'))
+      return Promise.reject(new Error('Mentalburst strategy is disabled'));
     if (frankySkillBlocked(d.skill, d.targets)) return Promise.reject(new Error('Skill conflicts with Franky-only combat'));
     if(returnCastBlocked(d))return Promise.reject(new Error('Skill conflicts with return movement or attacker-only policy'));
     const argument=d.argument ?? (d.targets.length>1 || world().skills[d.skill]?.multi ? d.targets.map(t=>t.id) : d.targets[0]?.id || d.targets[0]?.name);
-    return host.use_skill(d.skill,argument);
+    const compensate = d.skill === 'fanofknives' && stationaryCrabFarm(world().context);
+    const result = await host.use_skill(d.skill,argument);
+    if (compensate) compensateCrabCooldown();
+    return result;
   }
-  const kaneAura = createKaneAuraRecovery({
-    entities: () => host.entities,
-    width: entity => host.get_width(entity),
-    height: entity => host.get_height(entity),
-    canMove: point => can_move_to(point.x,point.y),
-  });
   const knifePositioner = createRogueKnifePositioner({
     world,
     center: () => shared.rogueKnifeFarm?.() || null,
-    auraRecovery: actor => world().context.farmingScript === 'lone-crab' ? kaneAura.destination(actor) : null,
     contains: point => shared.rogueKnifeFarmContains?.(point) ?? false,
     canMove: point => can_move_to(point.x, point.y),
     move: point => shared.rogueKnifeFarmMove?.(point) ?? false,
@@ -104,6 +127,7 @@ export function installSkillRuntime(root: CombatRoot) {
   const engine = createSkillEngine({
     rogueKnifeAttackHeld: () => knifePositioner.held(),
     world,
+    recoverMana: () => shared.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 1, priority: 'hp' }),
     cast:castSkill,
     evidence: (t, state, action) => shared.queueEvidence?.(t as Target, state, action) || null,
     diagnostic: d => { if (root.partyCombatState) root.partyCombatState.skill = d; },
@@ -120,7 +144,12 @@ export function installSkillRuntime(root: CombatRoot) {
   host.socket?.on?.('action', action);
   host.socket?.on?.('hit', hit);
   return { ...engine,
-    farmMovement: () => knifePositioner.tick(),
+    farmMovement: () => {
+      if (!shared.combatStrategyEnabled?.('kiting') && !stationaryCrabFarm(world().context)) {
+        knifePositioner.reset(); return false;
+      }
+      return knifePositioner.tick();
+    },
     reset() { engine.reset(); projectiles.clear(); knifePositioner.reset(); },
     stop() {
       engine.stop(); projectiles.clear(); knifePositioner.reset();

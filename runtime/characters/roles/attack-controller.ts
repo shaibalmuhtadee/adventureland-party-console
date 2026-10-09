@@ -44,6 +44,23 @@ export function createAttackController(ports: AttackPorts) {
     return Number.isFinite(value) ? value : null;
   };
   const remaining = () => Math.max(0, (clock() ?? retryAt) - Date.now());
+  const crabFarm = () => {
+    const focus = sharedRoutine.getMonsterFocus?.();
+    return focus?.length === 1 && focus[0] === 'crab' && !!sharedRoutine.rogueKnifeFarm?.();
+  };
+  function nextDelay(): number {
+    const ms = remaining();
+    // Wake just before the deadline, then yield in 1ms steps until it is ready.
+    if (crabFarm()) return ms > 8 ? ms - 6 : ms > 0 ? 1 : 25;
+    return ms > 2 ? ms - 2 : 100;
+  }
+  function scheduleSkill(accepted: boolean) {
+    const precise = crabFarm(), ms = remaining();
+    let retry = accepted ? 1 : 100;
+    if (!accepted && precise) retry = ms > 0 ? 1 : 25;
+    retryAt = Date.now() + retry;
+    schedule(Math.max(accepted && precise ? nextDelay() : ms, retry, 1));
+  }
   function cancelSlots() {
     if (burstTimer !== null) clearTimeout(burstTimer);
     burstTimer = null;
@@ -223,8 +240,7 @@ export function createAttackController(ports: AttackPorts) {
         void alternative.then(accepted => {
           if (epoch !== ports.epoch() || !ports.active()) return;
           if (accepted) lastSuccessfulTarget = target.id;
-          retryAt = Date.now() + (accepted ? 1 : 100);
-          schedule(Math.max(remaining(), retryAt - Date.now()));
+          scheduleSkill(accepted);
         }).catch(ports.report);
         return;
       }
@@ -253,8 +269,9 @@ export function createAttackController(ports: AttackPorts) {
       if (flight && (!confirmed(flight) || !ports.allowed() || sharedRoutine.basicAttackReserved?.() || sharedRoutine.caveRecoveryReserved?.())) cancelSlots();
       if (ports.allowed() && !flight && reserveHealing()) return;
       if (!target || !ports.allowed()) { ports.state().skippedAttack = "no eligible target or combat blocked"; return; }
-      if (Date.now() < retryAt || remaining() > 2) {
-        ports.state().skippedAttack = remaining() > 2 ? 'cooldown' : 'attack retry backoff';
+      const waitingForCooldown = remaining() > (crabFarm() ? 0 : 2);
+      if (Date.now() < retryAt || waitingForCooldown) {
+        ports.state().skippedAttack = waitingForCooldown ? 'cooldown' : 'attack retry backoff';
         return;
       }
       attackTarget(target);
@@ -262,7 +279,7 @@ export function createAttackController(ports: AttackPorts) {
     finally {
       const id=ports.selected(), reason=ports.state().skippedAttack;
       if(id && reason)sharedRoutine.noteCombatHandoff?.('blocked',id,{reason,cooldownReadyAt:clock()});
-      schedule(flight ? Math.max(1, flight.expires - Date.now()) : Math.max(remaining() > 2 ? remaining() - 2 : 100, retryAt - Date.now()));
+      schedule(flight ? Math.max(1, flight.expires - Date.now()) : Math.max(nextDelay(), retryAt - Date.now()));
     }
   }
   return {

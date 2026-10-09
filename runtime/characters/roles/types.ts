@@ -11,6 +11,10 @@ export interface Role {
   usePotion(): Promise<boolean>;
 }
 export interface SharedCombat {
+  partyBuffTargets?(): import('../skills/types.ts').Combatant[];
+  combatStrategySettings?(): import('../../combat/strategies.ts').StrategySettings;
+  combatStrategyEnabled?(id: import('../../combat/strategies.ts').CombatStrategyId): boolean;
+  stationaryCombatDestination?(target: Target, priest: Pick<Character, 'x' | 'y' | 'name' | 'ctype' | 'range'> | null, desired: number): Pick<Target, 'x' | 'y'> | null;
   autoConsumable?(): string | null;
   itemSwapSettings?(): import('../../item-swaps.ts').ItemSwap[];
   itemSwapMutationBlocked?(): boolean;
@@ -18,6 +22,8 @@ export interface SharedCombat {
   rogueKnifeFarmMove?(point?: { map: string; x: number; y: number }): boolean;
   rogueKnifeFarmContains?(point: { map: string; x: number; y: number }): boolean;
   getRogueKnifeTarget?: TargetGetter;
+  // Console focus also accepts the "all" selector and newly released monster IDs.
+  getMonsterFocus?(): string[];
   dungeonOwned?(): boolean;
   caveRecoveryReserved?(): boolean;
   caveRecoveryTick?(): Promise<boolean>;

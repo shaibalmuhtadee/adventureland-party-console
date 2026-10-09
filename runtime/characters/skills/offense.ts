@@ -1,6 +1,23 @@
 import { blocked, cost } from './eligibility.ts';
 import { damage, usefulDamage, purifiable } from './damage.ts';
 import { decision, type Combatant, type SkillDecision, type SkillId, type SkillWorld } from './types.ts';
+import { strategyEnabled } from '../../combat/strategies.ts';
+
+export function mentalburstDecision(w: SkillWorld, primary: Combatant | null): SkillDecision | null {
+  if (w.actor.ctype !== 'rogue' || !strategyEnabled(w.context.strategies, 'mentalburst')) return null;
+  const targets = w.context.farmingScript ? w.context.monsters.filter(target =>
+    w.context.farmingScript === 'lone-crab' ? target.mtype === 'crab' : w.context.farmingFocus?.includes(target.mtype)) :
+    primary ? [primary] : [];
+  const eligible = targets.filter(target => target.visible !== false && target.hp > w.incoming(target) &&
+    (!w.context.farmingScript || !w.range(target, 'fanofknives')) &&
+    !blocked(w, decision('mentalburst', [target])));
+  // Prefer a finishing blow for the native mana refund, but cast on healthy
+  // targets too when no finisher is available. Never predict refund mana.
+  const finisher = (target: Combatant) => damage(w, 'mentalburst', target, true) >= target.hp;
+  eligible.sort((a, b) => Number(finisher(b)) - Number(finisher(a)) ||
+    Number(b.id === primary?.id) - Number(a.id === primary?.id) || a.hp - b.hp || a.id.localeCompare(b.id));
+  return eligible[0] ? decision('mentalburst', [eligible[0]], 'damage', 'independent Mentalburst strategy') : null;
+}
 
 export function attackChoices(w: SkillWorld, primary: Combatant): SkillDecision[] {
   const ids: SkillId[] = w.actor.ctype === 'ranger' ? ['piercingshot', '3shot', '5shot'] :
@@ -42,13 +59,12 @@ function markUseful(w: SkillWorld, target: Combatant, remaining: number): boolea
 }
 export function damageChoices(w: SkillWorld, target: Combatant): SkillDecision[] {
   const classes: Partial<Record<ActorClass, SkillId[]>> = {
-    ranger: ['huntersmark', 'supershot'], rogue: ['mentalburst', 'quickstab', 'quickpunch'],
+    ranger: ['huntersmark', 'supershot'], rogue: ['quickstab', 'quickpunch'],
     paladin: ['purify', 'shield_slam', 'smash'],
   };
   const choices = (classes[w.actor.ctype] || []).filter(id => independentUseful(w, id, target))
     .map(id => decision(id, [target])).filter(d => !blocked(w, d));
   const score = (d: SkillDecision) => {
-    if (d.skill === 'mentalburst' && damage(w, d.skill, target, true) >= target.hp) return Infinity;
     if (d.skill === 'huntersmark') return Number.MAX_SAFE_INTEGER;
     const divisor = w.context.mode === 'event' ? (w.skills[d.skill]?.cooldown || 1000) / 1000 : Math.max(1, cost(w, d.skill));
     return usefulDamage(w, d.skill, target) / divisor;

@@ -28,6 +28,7 @@ export interface EntityReference {
 }
 
 export const heartbeatStateFields = [
+  'combatStrategies',
   "itemSwaps",
   "combatRecovery",
   "combatResetByCharacter",

@@ -9,6 +9,49 @@ Activate with the supported coordinator/dashboard-only restart.
 
 # Character coordinator
 
+Character cards expose a collapsed Strategies section below Farming settings.
+The per-character catalog and defaults live in `runtime/combat/strategies.ts`;
+settings persist in `combatStrategies` and use the dashboard export/import path.
+Kiting defaults on. Turning it off stops orbit/escape and rogue batch positioning;
+combat holds at weapon range and follows moving targets. The priest holds while
+in range, ranged fighters keep range, and melee fighters prefer the monster's
+side opposite the priest when reachable.
+Stationary positioning approaches the nearest reachable attack position before
+adjusting facing, and its arrival tolerance cannot hold a fighter outside range.
+Absorb sins defaults on and is priest-only;
+disabling it gates both skill decisions and native casts. Publish these changes
+with the full supported restart. Manual verification should cover each toggle,
+class visibility, settled positions, moving targets and restart persistence.
+
+Rspeed is a rogue-only strategy, enabled by default. Its maintenance pass buffs
+the rogue and living native party members in the same map/instance, including
+merchants, during farming and travel. It renews during the final minute of the
+buff, uses MP recovery when the cast plus survival reserve is unaffordable, and
+rechecks actual mana on the next pass. Pending renewals reserve MP from damage
+skills. Turning it off stops renewal; existing buffs expire naturally. Publish
+with the full restart. Manually verify solo/party upkeep, low MP recovery,
+expiry, toggle-off and out-of-range members returning to casting range.
+
+Mentalburst is a rogue-only strategy, enabled by default. The independent
+100ms combat pass uses its native cooldown without waiting for the attack/Fan
+of Knives family. It runs in ordinary combat and rogue farming, preferring
+authorized finishing blows for the native mana refund, then other eligible
+targets. Native requirements, range, actual MP, in-flight MP reservations and
+Rspeed renewal priority still apply; refunds are never predicted. Turning it
+off gates decisions and final casts. Publish with the full restart. Manually
+verify Mentalburst alongside crab Fan of Knives, cooldowns, low MP and toggle-off.
+
+With crab as a rogue's sole farming focus, Group and Scatter farming move to the
+selected spawn center and hold there, even when no targets are in range. There
+is no crab recovery movement toggle or pursuit. Fan of Knives uses its attack
+cooldown independently of Mentalburst; positioning never holds ready attacks.
+Mentalburst selects farming targets outside the 160-unit knife range and within
+its native range of 1.2 times current attack range plus 32. Travel and event
+movement retain their owners. Saved retired strategy IDs are discarded without
+resetting other strategy toggles. Publish through the full supported restart.
+Manually verify center arrival, stationary farming, both skill ranges and
+independent cooldowns, and persistence of remaining toggles after restart.
+
 Timed elixir inventory menus offer **Use automatically when expired** and
 **Stop automatic use**. Each character saves one selected consumable by item ID;
 the native runtime consumes it when the elixir slot is empty or expired, yielding

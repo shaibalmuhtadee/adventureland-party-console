@@ -150,7 +150,10 @@
   var role5 = {
     name: "rogue",
     combat: true,
-    usePotion: () => sharedRoutine.rogueKnifeFarm?.() ? sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" }) : Promise.resolve(false),
+    usePotion: () => {
+      if (character.mp < 1500) return sharedRoutine.useRecoveryPotion({ force: "mp" });
+      return sharedRoutine.rogueKnifeFarm?.() ? sharedRoutine.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 0.5, priority: "hp" }) : Promise.resolve(false);
+    },
     beforeTarget: () => sharedRoutine.skillSupport?.() ?? Promise.resolve(false),
     beforeAttack: (target) => sharedRoutine.skillOffense?.(target) ?? Promise.resolve(false)
   };
@@ -720,6 +723,9 @@
     return w.actor.hp - incomingDps({ ...w, context }, w.actor) * 2 > w.actor.max_hp * 0.3;
   }
   function blocked(w, d, pending = 0) {
+    if (d.skill === "absorb" && w.context.strategies?.["absorb-sins"] === false) return "Absorb sins strategy disabled";
+    if (d.skill === "rspeed" && w.context.strategies?.rspeed === false) return "Rspeed strategy disabled";
+    if (d.skill === "mentalburst" && w.context.strategies?.mentalburst === false) return "Mentalburst strategy disabled";
     if (w.context.mode === "blocked" || w.actor.rip) return "combat activity blocked";
     if (!ownsAggro(w, d)) return "leader owns aggro transfers";
     if (!unlocked(w, d.skill)) return "level, equipment, or requirements";
@@ -737,7 +743,26 @@
     return null;
   }
 
+  // runtime/combat/strategies.ts
+  var combatStrategies = [
+    { id: "kiting", label: "Kiting", description: "Move around attackers. When off, hold combat position and follow moving targets.", classes: null, defaultEnabled: true },
+    { id: "absorb-sins", label: "Absorb sins", description: "Transfer party aggro to the priest during combat.", classes: ["priest"], defaultEnabled: true },
+    { id: "rspeed", label: "Rspeed", description: "Keep Rogue Swiftness active on yourself and nearby party members. Recover MP before casting when needed.", classes: ["rogue"], defaultEnabled: true },
+    { id: "mentalburst", label: "Mentalburst", description: "Use Mental Burst whenever ready and affordable, alongside Fan of Knives. Requires 64 INT.", classes: ["rogue"], defaultEnabled: true }
+  ];
+  function strategyEnabled(settings, id) {
+    return settings?.[id] ?? combatStrategies.find((strategy) => strategy.id === id).defaultEnabled;
+  }
+
   // runtime/characters/skills/offense.ts
+  function mentalburstDecision(w, primary) {
+    if (w.actor.ctype !== "rogue" || !strategyEnabled(w.context.strategies, "mentalburst")) return null;
+    const targets = w.context.farmingScript ? w.context.monsters.filter((target) => w.context.farmingScript === "lone-crab" ? target.mtype === "crab" : w.context.farmingFocus?.includes(target.mtype)) : primary ? [primary] : [];
+    const eligible = targets.filter((target) => target.visible !== false && target.hp > w.incoming(target) && (!w.context.farmingScript || !w.range(target, "fanofknives")) && !blocked(w, decision("mentalburst", [target])));
+    const finisher = (target) => damage(w, "mentalburst", target, true) >= target.hp;
+    eligible.sort((a, b) => Number(finisher(b)) - Number(finisher(a)) || Number(b.id === primary?.id) - Number(a.id === primary?.id) || a.hp - b.hp || a.id.localeCompare(b.id));
+    return eligible[0] ? decision("mentalburst", [eligible[0]], "damage", "independent Mentalburst strategy") : null;
+  }
   function attackChoices(w, primary) {
     const ids = w.actor.ctype === "ranger" ? ["piercingshot", "3shot", "5shot"] : w.actor.ctype === "rogue" ? ["fanofknives"] : [];
     return ids.map((id) => {
@@ -774,12 +799,11 @@
   function damageChoices(w, target) {
     const classes = {
       ranger: ["huntersmark", "supershot"],
-      rogue: ["mentalburst", "quickstab", "quickpunch"],
+      rogue: ["quickstab", "quickpunch"],
       paladin: ["purify", "shield_slam", "smash"]
     };
     const choices = (classes[w.actor.ctype] || []).filter((id) => independentUseful(w, id, target)).map((id) => decision(id, [target])).filter((d) => !blocked(w, d));
     const score = (d) => {
-      if (d.skill === "mentalburst" && damage(w, d.skill, target, true) >= target.hp) return Infinity;
       if (d.skill === "huntersmark") return Number.MAX_SAFE_INTEGER;
       const divisor = w.context.mode === "event" ? (w.skills[d.skill]?.cooldown || 1e3) / 1e3 : Math.max(1, cost(w, d.skill));
       return usefulDamage(w, d.skill, target) / divisor;
@@ -788,6 +812,9 @@
   }
 
   // runtime/characters/farming/rogue-knives.ts
+  function stationaryCrabFarm(context) {
+    return context.farmingScript === "lone-crab" || context.farmingScript === "rogue-scatter" && context.farmingFocus?.length === 1 && context.farmingFocus[0] === "crab";
+  }
   function focused(w, t) {
     return w.context.farmingScript === "lone-crab" ? t.mtype === "crab" : !!w.context.farmingFocus?.includes(t.mtype);
   }
@@ -827,14 +854,14 @@
           reason
         });
       }
-      return { center, eligible, cap, count, here, current, report };
+      return { center, eligible, cap, range, count, here, current, report };
     }
     return {
       reset,
       held() {
         if (!moving || Date.now() >= moving.holdUntil || !ports.center()) return false;
         const w = ports.world();
-        if (w.context.farmingScript === "lone-crab" && (!w.actor.s.citizen0aura || w.actor.s.citizen0aura.ms != null && w.actor.s.citizen0aura.ms <= 0)) return false;
+        if (stationaryCrabFarm(w.context)) return false;
         return !!w.context.farmingScript && eligibleTargets(w).filter((t) => w.range(t, "fanofknives")).length <= 2;
       },
       tick() {
@@ -849,12 +876,11 @@
           region = key;
         }
         const s = sample(w, center);
-        const refresh = ports.auraRecovery(w.actor);
-        if (refresh) {
+        if (stationaryCrabFarm(w.context)) {
           moving = null;
           planAt = 0;
-          s.report(refresh, "refreshing Kane aura");
-          return ports.move(refresh);
+          s.report(center, "spawn center");
+          return ports.move(center);
         }
         if (!centered) {
           centered = length(s.here, center) <= 2;
@@ -937,6 +963,7 @@
 
   // runtime/characters/skills/protection.ts
   function absorbDecision(w) {
+    if (!strategyEnabled(w.context.strategies, "absorb-sins")) return null;
     if (w.actor.ctype !== "priest" || w.context.leader !== w.actor.name) return null;
     if (w.actor.mp - cost(w, "absorb") < cost(w, "heal")) return null;
     const ally = w.context.allies.filter((a) => a.name !== w.actor.name && w.context.monsters.some((m) => m.target === a.name) && safeTransfer(w, a)).sort((a, b) => health(a) - health(b) || a.name.localeCompare(b.name)).find((a) => w.range(a, "absorb"));
@@ -1007,11 +1034,10 @@
   function paladinSupport(w) {
     return [selfHeal(w), shield(w), cleanse(w), oath(w), beacon(w), aura(w)].filter((d) => !!d);
   }
-  function rogueSupport(w) {
-    const rogues = w.context.allies.filter((a) => a.ctype === "rogue" && a.level >= 40).sort((a, b) => a.name.localeCompare(b.name));
-    if (rogues[0]?.name !== w.actor.name) return [];
-    const target = w.context.allies.find((a) => (!a.s?.rspeed || (a.s.rspeed.ms || 0) < 6e4) && w.range(a, "rspeed"));
-    return target ? [decision("rspeed", [target], "maintenance", "maintain party swiftness")] : [];
+  function rspeedDecision(w) {
+    if (w.actor.ctype !== "rogue" || !strategyEnabled(w.context.strategies, "rspeed") || !unlocked(w, "rspeed")) return null;
+    const target = w.context.allies.filter((a) => !a.dead && !a.rip && a.hp > 0 && (!a.s?.rspeed || a.s.rspeed.ms !== void 0 && a.s.rspeed.ms <= 6e4) && w.range(a, "rspeed")).sort((a, b) => (a.s?.rspeed?.ms ?? 0) - (b.s?.rspeed?.ms ?? 0) || Number(b.name === w.actor.name) - Number(a.name === w.actor.name) || a.name.localeCompare(b.name))[0];
+    return target ? decision("rspeed", [target], "maintenance", "maintain party swiftness") : null;
   }
   function combatBuffSupport(w) {
     const skill = w.actor.ctype === "warrior" ? "warcry" : w.actor.ctype === "priest" ? "darkblessing" : null;
@@ -1029,8 +1055,8 @@
     const budget = createManaBudget(), pending = /* @__PURE__ */ new Map();
     let epoch = 0, stopped = false, auraAt = -Infinity, auraState = "", openerPending = false;
     const failures = /* @__PURE__ */ new Map();
-    function world() {
-      const w = ports.world();
+    function world(skill) {
+      const w = ports.world(skill);
       for (const [id, p] of pending) if (p.until <= w.now && !w.cooldown(id)) pending.delete(id);
       return w;
     }
@@ -1054,9 +1080,16 @@
         return false;
       }
       if (pending.has(family(w, d.skill)) || (failures.get(d.skill) || 0) > w.now) return false;
+      if (d.category === "damage" && w.actor.ctype === "rogue") {
+        const renewal = world("rspeed");
+        if (rspeedDecision(renewal) && w.actor.mp - inFlight - cost(w, d.skill) < reserve(renewal) + cost(renewal, "rspeed")) {
+          report(w, d, "skipped", "MP reserved for Rspeed renewal");
+          return false;
+        }
+      }
       const cap = Math.max(0, ...Object.keys(w.skills).map((id) => id).filter((id) => unlocked(w, id) && cost(w, id) <= w.actor.mp - reserve(w)).map((id) => cost(w, id)));
       const credit = budget.observe(w.now, w.actor.mp, w.actor.mp - reserve(w), cap);
-      if (d.category === "damage" && w.context.mode !== "event" && !(!!w.context.farmingScript && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
+      if (d.category === "damage" && d.skill !== "mentalburst" && w.context.mode !== "event" && !(!!w.context.farmingScript && d.skill === "fanofknives") && credit < cost(w, d.skill)) {
         report(w, d, "skipped", "sustained farming MP budget");
         return false;
       }
@@ -1082,8 +1115,11 @@
         auraState = d.argument || "";
       }
     }
+    function failureDelay(w, d, reason) {
+      return d.skill === "fanofknives" && stationaryCrabFarm(w.context) && reason === "cooldown" ? 10 : 1e3;
+    }
     async function execute(d) {
-      const w = world();
+      const w = world(d.skill);
       if (stopped || !affordable(w, d)) return false;
       const id = family(w, d.skill), amount = cost(w, d.skill);
       const token = { epoch, cost: amount, until: w.now + 2500 };
@@ -1104,8 +1140,9 @@
       } catch (error) {
         rejectActions(d, actions);
         if (epoch !== token.epoch || stopped) return false;
-        failures.set(d.skill, ports.world().now + 1e3);
-        report(w, d, "rejected", errorReason(error));
+        const reason = errorReason(error);
+        failures.set(d.skill, ports.world().now + failureDelay(w, d, reason));
+        report(w, d, "rejected", reason);
         return false;
       } finally {
         clearTimeout(timeout);
@@ -1122,14 +1159,33 @@
         return affordable(world(), d);
       },
       cast: execute,
+      mentalburst(target) {
+        const w = world("mentalburst");
+        const id = family(w, "mentalburst");
+        if (stopped || pending.has(id) || w.cooldown(id) || (failures.get("mentalburst") || 0) > w.now) return Promise.resolve(false);
+        const d = mentalburstDecision(w, target);
+        return d ? execute(d) : Promise.resolve(false);
+      },
       async absorb() {
         const d = absorbDecision(world());
         return d ? execute(d) : false;
       },
+      async maintainRspeed() {
+        const w = world("rspeed"), d = rspeedDecision(w);
+        if (stopped || !d || pending.has(family(w, "rspeed")) || (failures.get("rspeed") || 0) > w.now) return false;
+        const inFlight = [...pending.values()].reduce((n, p) => n + p.cost, 0);
+        const reason = blocked(w, d, inFlight);
+        if (reason === "insufficient MP" || reason === "survival MP reserved") {
+          report(w, d, "skipped", "recovering MP for Rspeed");
+          await ports.recoverMana?.();
+          return false;
+        }
+        return execute(d);
+      },
       support() {
         const w = world();
         if (!!w.context.farmingScript) return Promise.resolve(false);
-        const choices = w.actor.ctype === "paladin" ? paladinSupport(w) : w.actor.ctype === "rogue" ? rogueSupport(w) : combatBuffSupport(w);
+        const choices = w.actor.ctype === "paladin" ? paladinSupport(w) : combatBuffSupport(w);
         return first(choices.filter((d) => d.skill !== "paladin_aura" || w.now - auraAt >= 1e4 && d.argument !== auraState));
       },
       offense(target) {
@@ -1212,45 +1268,54 @@
     };
   }
 
-  // runtime/characters/farming/kane-aura.ts
-  var AURA_RANGE = 320;
-  function createKaneAuraRecovery(ports) {
-    let lastSeen = null;
-    return {
-      destination(actor) {
-        if (lastSeen && (lastSeen.map !== actor.map || lastSeen.in !== actor.in)) lastSeen = null;
-        const kane = Object.values(ports.entities()).find((e) => "npc" in e && e.npc === "citizen0" && e.visible !== false && !e.dead && !e.rip && (!e.map || e.map === actor.map) && (e.in == null || e.in === actor.in));
-        if (kane) lastSeen = {
-          ...kane,
-          map: actor.map,
-          in: actor.in,
-          x: kane.real_x ?? kane.x,
-          y: kane.real_y ?? kane.y
-        };
-        const npc = kane || lastSeen;
-        const buff = actor.s.citizen0aura;
-        if (buff && (buff.ms == null || buff.ms > 0) || !npc) return null;
-        const here = { map: actor.map, x: actor.real_x ?? actor.x, y: actor.real_y ?? actor.y };
-        if (distance(actor, npc) < AURA_RANGE) return here;
-        const x = npc.real_x ?? npc.x, y = npc.real_y ?? npc.y;
-        const halfWidth = (ports.width(actor) + ports.width(npc)) / 2;
-        const nearest = {
-          x: Math.max(x - halfWidth, Math.min(x + halfWidth, here.x)),
-          y: Math.max(y - ports.height(npc), Math.min(y + ports.height(actor), here.y))
-        };
-        const dx = here.x - nearest.x, dy = here.y - nearest.y, gap = Math.hypot(dx, dy);
-        const ratio = Math.min(1, (AURA_RANGE - 1) / Math.max(1, gap));
-        const projected = { map: actor.map, x: nearest.x + dx * ratio, y: nearest.y + dy * ratio };
-        const reachable = (point) => ports.canMove(point) && distance({ ...actor, x: point.x, y: point.y, real_x: point.x, real_y: point.y }, npc) < AURA_RANGE;
-        if (reachable(projected)) return projected;
-        const candidates = [{ map: actor.map, x, y }];
-        for (const radius of [319, 239, 159, 79]) for (let i = 0; i < 64; i++) {
-          const angle = i * Math.PI / 32;
-          candidates.push({ map: actor.map, x: x + Math.cos(angle) * radius, y: y + Math.sin(angle) * radius });
-        }
-        return candidates.filter(reachable).sort((a, b) => Math.hypot(a.x - here.x, a.y - here.y) - Math.hypot(b.x - here.x, b.y - here.y))[0] || here;
+  // runtime/combat/stationary-position.ts
+  function stationaryPosition(input) {
+    const { actor, target, priest, desiredRange, distance: distance2, canMove } = input;
+    const gap = distance2(actor);
+    const approaching = gap > actor.range;
+    if (actor.ctype === "priest" && gap <= actor.range) return actor;
+    const melee = ["warrior", "rogue", "paladin"].includes(actor.ctype);
+    const dx = actor.x - target.x, dy = actor.y - target.y;
+    const radius = desiredRange + Math.max(0, Math.hypot(dx, dy) - gap);
+    const bearing = Math.atan2(dy, dx);
+    const priestX = priest ? priest.x - target.x : 0, priestY = priest ? priest.y - target.y : 0;
+    const behind = (point) => !melee || !priest || priest.name === actor.name || Math.hypot(priestX, priestY) < 1 || (point.x - target.x) * priestX + (point.y - target.y) * priestY <= 0;
+    const tankSpacing = priest ? Math.hypot(actor.x - priest.x, actor.y - priest.y) : Infinity;
+    if (Math.abs(gap - desiredRange) <= 3 && gap <= actor.range && behind(actor) && (actor.ctype !== "mage" || tankSpacing >= 40)) return actor;
+    const candidates = [];
+    for (let i = 0; i < 32; i++) {
+      const angle = bearing + i * Math.PI / 16;
+      const point = { x: target.x + Math.cos(angle) * radius, y: target.y + Math.sin(angle) * radius };
+      if (!canMove(point)) continue;
+      const range = distance2(point);
+      if (range > actor.range) continue;
+      const priestGap = priest ? Math.hypot(point.x - priest.x, point.y - priest.y) : 0;
+      const coverage = priest && priest.name !== actor.name ? Math.max(0, priestGap - priest.range + 8) : 0;
+      const travel = Math.hypot(point.x - actor.x, point.y - actor.y);
+      const positionScore = [
+        Math.max(0, Math.abs(range - desiredRange) - 3),
+        behind(point) ? 0 : 1,
+        coverage,
+        actor.ctype === "mage" && priest ? Math.max(0, 40 - priestGap) : 0
+      ];
+      candidates.push({ point, score: approaching ? [travel, ...positionScore] : [...positionScore, travel] });
+    }
+    candidates.sort((a, b) => {
+      for (let i = 0; i < a.score.length; i++) {
+        const difference = a.score[i] - b.score[i];
+        if (difference) return difference;
       }
-    };
+      return 0;
+    });
+    if (candidates[0]) return candidates[0].point;
+    const ideal = { x: target.x + Math.cos(bearing) * radius, y: target.y + Math.sin(bearing) * radius };
+    const step = Math.min(24, Math.hypot(ideal.x - actor.x, ideal.y - actor.y));
+    const direction = Math.atan2(ideal.y - actor.y, ideal.x - actor.x);
+    for (const offset of [0, 0.4, -0.4, 0.8, -0.8]) {
+      const point = { x: actor.x + Math.cos(direction + offset) * step, y: actor.y + Math.sin(direction + offset) * step };
+      if (canMove(point)) return point;
+    }
+    return null;
   }
 
   // runtime/characters/skills/runtime.ts
@@ -1263,10 +1328,27 @@
   function installSkillRuntime(root) {
     const host = parent;
     const shared = root.sharedRoutine;
+    shared.combatStrategyEnabled = (id) => strategyEnabled(shared.combatStrategySettings?.(), id);
+    shared.stationaryCombatDestination = (target, priest, desiredRange) => stationaryPosition({
+      actor: character,
+      target,
+      priest,
+      desiredRange,
+      distance: (point) => distance({ ...character, x: point.x, y: point.y, real_x: point.x, real_y: point.y }, target),
+      canMove: (point) => can_move_to(point.x, point.y)
+    });
     const projectiles = createProjectileTracker(world);
-    function world() {
+    function world(skill) {
       const actor = character;
-      const context = shared.combatContext?.() || {
+      const context = skill === "rspeed" ? {
+        leader: actor.name,
+        allies: shared.partyBuffTargets?.() || [],
+        monsters: [],
+        strategies: shared.combatStrategySettings?.(),
+        mode: host.socket?.connected ? "grouped" : "blocked",
+        event: null,
+        observedAt: Date.now()
+      } : shared.combatContext?.() || {
         leader: "",
         allies: [],
         monsters: [],
@@ -1317,22 +1399,30 @@
       if (!shared.frankyCombatActive?.()) return false;
       return frankyExcluded.has(id) || !!world().skills[id]?.hostile && targets.some((t) => t.type !== "monster" || t.mtype !== "franky" || !shared.skillTargetAllowed?.(t));
     }
-    function castSkill(d) {
+    function compensateCrabCooldown() {
+      if (!stationaryCrabFarm(world().context) || typeof reduce_cooldown !== "function") return;
+      const samples = (host.pings || []).filter((p) => Number.isFinite(p) && p >= 0);
+      const remaining = Math.max(0, Number(host.next_skill?.attack) - Date.now()) || 0;
+      if (samples.length) reduce_cooldown("attack", Math.min(remaining, Math.min(...samples)));
+    }
+    async function castSkill(d) {
+      if (d.skill === "absorb" && !shared.combatStrategyEnabled?.("absorb-sins"))
+        return Promise.reject(new Error("Absorb sins strategy is disabled"));
+      if (d.skill === "rspeed" && !shared.combatStrategyEnabled?.("rspeed"))
+        return Promise.reject(new Error("Rspeed strategy is disabled"));
+      if (d.skill === "mentalburst" && !shared.combatStrategyEnabled?.("mentalburst"))
+        return Promise.reject(new Error("Mentalburst strategy is disabled"));
       if (frankySkillBlocked(d.skill, d.targets)) return Promise.reject(new Error("Skill conflicts with Franky-only combat"));
       if (returnCastBlocked(d)) return Promise.reject(new Error("Skill conflicts with return movement or attacker-only policy"));
       const argument = d.argument ?? (d.targets.length > 1 || world().skills[d.skill]?.multi ? d.targets.map((t) => t.id) : d.targets[0]?.id || d.targets[0]?.name);
-      return host.use_skill(d.skill, argument);
+      const compensate = d.skill === "fanofknives" && stationaryCrabFarm(world().context);
+      const result = await host.use_skill(d.skill, argument);
+      if (compensate) compensateCrabCooldown();
+      return result;
     }
-    const kaneAura = createKaneAuraRecovery({
-      entities: () => host.entities,
-      width: (entity) => host.get_width(entity),
-      height: (entity) => host.get_height(entity),
-      canMove: (point) => can_move_to(point.x, point.y)
-    });
     const knifePositioner = createRogueKnifePositioner({
       world,
       center: () => shared.rogueKnifeFarm?.() || null,
-      auraRecovery: (actor) => world().context.farmingScript === "lone-crab" ? kaneAura.destination(actor) : null,
       contains: (point) => shared.rogueKnifeFarmContains?.(point) ?? false,
       canMove: (point) => can_move_to(point.x, point.y),
       move: (point) => shared.rogueKnifeFarmMove?.(point) ?? false,
@@ -1344,6 +1434,7 @@
     const engine = createSkillEngine({
       rogueKnifeAttackHeld: () => knifePositioner.held(),
       world,
+      recoverMana: () => shared.useRecoveryPotion({ hpBelow: 0.5, mpBelow: 1, priority: "hp" }),
       cast: castSkill,
       evidence: (t, state, action2) => shared.queueEvidence?.(t, state, action2) || null,
       diagnostic: (d) => {
@@ -1363,7 +1454,13 @@
     host.socket?.on?.("hit", hit);
     return {
       ...engine,
-      farmMovement: () => knifePositioner.tick(),
+      farmMovement: () => {
+        if (!shared.combatStrategyEnabled?.("kiting") && !stationaryCrabFarm(world().context)) {
+          knifePositioner.reset();
+          return false;
+        }
+        return knifePositioner.tick();
+      },
       reset() {
         engine.reset();
         projectiles.clear();
@@ -1662,6 +1759,22 @@
       return Number.isFinite(value) ? value : null;
     };
     const remaining = () => Math.max(0, (clock() ?? retryAt) - Date.now());
+    const crabFarm = () => {
+      const focus = sharedRoutine.getMonsterFocus?.();
+      return focus?.length === 1 && focus[0] === "crab" && !!sharedRoutine.rogueKnifeFarm?.();
+    };
+    function nextDelay() {
+      const ms = remaining();
+      if (crabFarm()) return ms > 8 ? ms - 6 : ms > 0 ? 1 : 25;
+      return ms > 2 ? ms - 2 : 100;
+    }
+    function scheduleSkill(accepted) {
+      const precise = crabFarm(), ms = remaining();
+      let retry = accepted ? 1 : 100;
+      if (!accepted && precise) retry = ms > 0 ? 1 : 25;
+      retryAt = Date.now() + retry;
+      schedule(Math.max(accepted && precise ? nextDelay() : ms, retry, 1));
+    }
     function cancelSlots() {
       if (burstTimer !== null) clearTimeout(burstTimer);
       burstTimer = null;
@@ -1862,8 +1975,7 @@
           void alternative.then((accepted) => {
             if (epoch !== ports.epoch() || !ports.active()) return;
             if (accepted) lastSuccessfulTarget = target.id;
-            retryAt = Date.now() + (accepted ? 1 : 100);
-            schedule(Math.max(remaining(), retryAt - Date.now()));
+            scheduleSkill(accepted);
           }).catch(ports.report);
           return;
         }
@@ -1899,8 +2011,9 @@
           ports.state().skippedAttack = "no eligible target or combat blocked";
           return;
         }
-        if (Date.now() < retryAt || remaining() > 2) {
-          ports.state().skippedAttack = remaining() > 2 ? "cooldown" : "attack retry backoff";
+        const waitingForCooldown = remaining() > (crabFarm() ? 0 : 2);
+        if (Date.now() < retryAt || waitingForCooldown) {
+          ports.state().skippedAttack = waitingForCooldown ? "cooldown" : "attack retry backoff";
           return;
         }
         attackTarget(target);
@@ -1911,7 +2024,7 @@
       } finally {
         const id = ports.selected(), reason = ports.state().skippedAttack;
         if (id && reason) sharedRoutine.noteCombatHandoff?.("blocked", id, { reason, cooldownReadyAt: clock() });
-        schedule(flight ? Math.max(1, flight.expires - Date.now()) : Math.max(remaining() > 2 ? remaining() - 2 : 100, retryAt - Date.now()));
+        schedule(flight ? Math.max(1, flight.expires - Date.now()) : Math.max(nextDelay(), retryAt - Date.now()));
       }
     }
     return {
@@ -3183,6 +3296,10 @@
       return sharedRoutine.getPassingTarget?.() || null;
     }
     function attackTarget() {
+      const focus = sharedRoutine.getMonsterFocus?.();
+      if (focus?.length === 1 && focus[0] === "crab" && sharedRoutine.rogueKnifeFarm?.()) {
+        return eligibleSelection(sharedRoutine.getRogueKnifeTarget?.() || null);
+      }
       const current = currentTarget(), passing = passingTarget();
       if (!current) return passing;
       if (!passing) return current;
@@ -3312,6 +3429,8 @@
       const dungeon = !!sharedRoutine.dungeonOwned?.();
       try {
         equipmentTick();
+        if (character.ctype === "rogue" && combatAllowed() && !equipment2?.busy() && !itemSwaps?.busy())
+          void skills?.mentalburst(attackTarget()).catch(reportError);
         if (dungeon && !combatAllowed()) {
           root.sharedRoutine?.resetCombatMovement?.();
           return;
@@ -3390,7 +3509,9 @@
       const epoch = generation;
       try {
         const role8 = resolvedRole();
-        if (character.rip || sharedRoutine.isOccupied()) return;
+        if (character.rip) return;
+        if (character.ctype === "rogue") await skills?.maintainRspeed();
+        if (!currentEpoch(epoch) || character.rip || sharedRoutine.isOccupied()) return;
         const mode = sharedRoutine.getAbtestingMode();
         if (mode === "pending") return;
         if (mode === "feed") {

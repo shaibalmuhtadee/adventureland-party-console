@@ -101,6 +101,12 @@ export function installRoleRunner(
     return (sharedRoutine as any).getPassingTarget?.() || null;
   }
   function attackTarget(): Target | null {
+    const focus = sharedRoutine.getMonsterFocus?.();
+    if (focus?.length === 1 && focus[0] === 'crab' && sharedRoutine.rogueKnifeFarm?.()) {
+      // Crab respawns must be eligible on this attack tick, without waiting for
+      // the ordinary one-second selection refresh after the previous batch dies.
+      return eligibleSelection(sharedRoutine.getRogueKnifeTarget?.() || null);
+    }
     const current = currentTarget(), passing = passingTarget();
     if (!current) return passing;
     if (!passing) return current;
@@ -222,6 +228,10 @@ export function installRoleRunner(
     const dungeon = !!sharedRoutine.dungeonOwned?.();
     try {
       equipmentTick();
+      // This pass follows the independent skill cooldown, never the attack
+      // scheduler's pending Fan of Knives cast or attack-family deadline.
+      if (character.ctype === 'rogue' && combatAllowed() && !equipment?.busy() && !itemSwaps?.busy())
+        void skills?.mentalburst(attackTarget()).catch(reportError);
       if (dungeon && !combatAllowed()) { root.sharedRoutine?.resetCombatMovement?.(); return; }
       if (!dungeon) {
         if(sharedRoutine.returnCombatActive?.()) {
@@ -297,7 +307,9 @@ export function installRoleRunner(
     const epoch = generation;
     try {
       const role = resolvedRole();
-      if (character.rip || sharedRoutine.isOccupied()) return;
+      if (character.rip) return;
+      if (character.ctype === 'rogue') await skills?.maintainRspeed();
+      if (!currentEpoch(epoch) || character.rip || sharedRoutine.isOccupied()) return;
       const mode = sharedRoutine.getAbtestingMode();
       if (mode === "pending") return;
       if (mode === "feed") {

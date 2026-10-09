@@ -36,6 +36,7 @@ export const selectionFields = [
 ] as const;
 
 export const settingsFields = [
+  'combatStrategies',
   "itemSwaps",
   "dailyDungeons",
   "merchantRules", "production", "upgradeOfferingRules", "upgradePreviewResults",

@@ -187,6 +187,7 @@ export function createHeartbeatResponse(state: HeartbeatState, ports: HeartbeatR
         convoySignal: ports.convoySignal(name),
         combatRecovery: state.combatRecovery,
         combatResetByCharacter: state.combatResetByCharacter,
+        combatStrategies: state.combatStrategies,
         travelCombat: travelCombatFor(state as TravelState, name),
       };
     const names = ports.activeNames();
